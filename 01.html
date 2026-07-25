@@ -1,0 +1,1577 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Molecule 3D Viewer</title>
+    <style>
+        :root {
+            --bg-dark-panel: rgba(15, 15, 15, 0.85);
+            --border-light: rgba(255, 255, 255, 0.1);
+            --border-light-focus: rgba(255, 255, 255, 0.15);
+            --text-active: #deff9a;
+            --text-active-lvl2: #ffde9a;
+        }
+
+        /* ★スクロール破綻を物理的に防ぐ完全固定スタイル */
+        html, body {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            touch-action: none;
+            overscroll-behavior: none;
+            margin: 0;
+            padding: 0;
+            background-color: #eaf4ff;
+            color: #f0f0f0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            transition: background-color 0.3s ease;
+        }
+        
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+        
+        #canvas-container {
+            flex-grow: 1;
+            width: 100%;
+            height: 100%;
+            position: relative;
+            z-index: 1;
+            touch-action: none;
+            overflow: hidden; /* はみ出し防止 */
+        }
+
+        .view-label {
+            position: absolute;
+            top: 15px;
+            font-size: 11px;
+            letter-spacing: 2px;
+            color: rgba(0, 0, 0, 0.25);
+            text-transform: uppercase;
+            font-weight: 500;
+            pointer-events: none;
+            z-index: 10;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 80vw;
+            transition: opacity 0.5s ease, left 0.3s ease;
+        }
+        #label-left { left: 20px; }
+        #label-right { display: none; }
+
+        /* UI基本レイアウト */
+        #ui-wrapper {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+            z-index: 1000;
+            pointer-events: none;
+            transition: opacity 0.5s ease, transform 0.3s ease;
+        }
+
+        .ui-panel {
+            pointer-events: auto;
+            background: var(--bg-dark-panel);
+            backdrop-filter: blur(10px);
+            border-radius: 30px;
+            padding: 6px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border: 1px solid var(--border-light);
+            transition: all 0.3s ease;
+        }
+
+        #search-panel {
+            padding: 0;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            backdrop-filter: none;
+        }
+
+        .ui-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-right: 1px solid var(--border-light);
+            padding-right: 12px;
+        }
+        .ui-group:last-child {
+            border-right: none;
+            padding-right: 0;
+        }
+
+        #search-container {
+            display: flex;
+            align-items: center;
+            background: var(--bg-dark-panel); 
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-light-focus);
+            border-radius: 20px;
+            padding: 6px 8px 6px 14px;
+            gap: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            transition: all 0.3s ease;
+        }
+        #search-input {
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-size: 13px;
+            outline: none;
+            width: 140px;
+            transition: width 0.3s ease;
+        }
+        #search-input::placeholder {
+            color: rgba(255, 255, 255, 0.45); 
+        }
+
+        #search-clear {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            color: rgba(255, 255, 255, 0.5);
+            display: none; 
+            align-items: center;
+            justify-content: center;
+            padding: 2px;
+            transition: color 0.2s ease;
+        }
+        #search-clear:hover {
+            color: #fff;
+        }
+        #search-clear svg {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+            stroke-width: 2;
+            fill: none;
+        }
+
+        .icon-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px;
+            border-radius: 50%;
+            color: rgba(255, 255, 255, 0.6);
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .icon-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .icon-btn.active {
+            color: var(--text-active);
+            background: rgba(222, 255, 154, 0.15);
+        }
+        .icon-btn svg {
+            width: 18px;
+            height: 18px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            pointer-events: none;
+        }
+
+        .icon-btn.level-2 {
+            color: var(--text-active-lvl2);
+            background: rgba(255, 222, 154, 0.15);
+        }
+
+        /* モーダル用CSS */
+        #ss-overlay {
+            display: none;
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100dvh;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(5px);
+            z-index: 1999; pointer-events: auto;
+        }
+        #ss-modal {
+            display: none;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 2000; flex-direction: column; padding: 20px 24px;
+            width: 90%; max-width: 380px; gap: 16px;
+        }
+        .ss-row {
+            display: flex; justify-content: space-between; align-items: center; width: 100%;
+        }
+        .ss-row label {
+            font-size: 12px; color: rgba(255,255,255,0.7); font-weight: 500;
+        }
+        .ss-segment {
+            display: flex; gap: 4px; background: rgba(255,255,255,0.05);
+            padding: 4px; border-radius: 20px; border: 1px solid var(--border-light);
+        }
+
+        #toast-notification {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(240, 80, 80, 0.9);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 3000;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            opacity: 0;
+            display: none;
+            transition: opacity 0.4s ease;
+            pointer-events: none;
+        }
+
+        #portrait-warning {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100dvh; 
+            background: #0a0a0a;
+            color: #fff;
+            z-index: 9999;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            text-align: center;
+        }
+        #portrait-warning svg {
+            width: 48px;
+            height: 48px;
+            stroke: #deff9a;
+            margin-bottom: 20px;
+            fill: none;
+            stroke-width: 1.5;
+        }
+        #portrait-warning p {
+            font-size: 14px;
+            letter-spacing: 1px;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        @media (max-width: 1024px) and (orientation: portrait), (pointer: coarse) and (orientation: portrait) {
+            #portrait-warning {
+                display: flex;
+            }
+        }
+
+        @media (max-width: 1366px) and (orientation: landscape), (pointer: coarse) and (orientation: landscape) {
+            #ui-wrapper {
+                bottom: 0; top: 0; left: 0; right: 0; transform: none; display: block;
+            }
+            #control-panel {
+                position: absolute; left: 0; top: 50%;
+                transform: translateY(-50%) scale(0.85); transform-origin: left center;
+                flex-direction: column; padding: 16px 8px; gap: 12px;
+                border-radius: 0 24px 24px 0; border-left: none;
+            }
+            .ui-group {
+                flex-direction: column; border-right: none;
+                border-bottom: 1px solid var(--border-light);
+                padding-right: 0; padding-bottom: 12px; gap: 8px;
+            }
+            .ui-group:last-child {
+                border-bottom: none; padding-bottom: 0;
+            }
+            #search-panel {
+                position: absolute; bottom: 24px; left: 50vw;
+                transform: translateX(-50%); display: block;
+            }
+            #search-container {
+                opacity: 0.85; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+                padding: 6px 8px 6px 14px; 
+            }
+            #search-input {
+                width: 140px; font-size: 14px;
+            }
+            #search-container:focus-within {
+                opacity: 1.0; box-shadow: 0 10px 25px rgba(0,0,0,0.7);
+            }
+            #search-container:focus-within #search-input {
+                width: 180px; 
+            }
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <div id="app-container">
+        <!-- スクリーンセーバー解除用バリア（イベント遮断用） -->
+        <div id="ss-exit-overlay" style="display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100dvh; z-index: 1500; cursor: pointer;"></div>
+
+        <div id="portrait-warning">
+            <svg viewBox="0 0 24 24">
+                <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                <path d="M12 18h.01"/>
+                <path d="M17 6H7"/>
+            </svg>
+            <p>立体視の表示最適化のため、端末を横向き（Landscape）に回転してください。</p>
+        </div>
+        <div id="toast-notification"></div>
+        
+        <div id="label-left" class="view-label">L-cysteine</div>
+        <div id="label-right" class="view-label"></div>
+        
+        <div id="canvas-container"></div>
+
+        <div id="ui-wrapper">
+            <div id="search-panel" class="ui-panel">
+                <div id="search-container">
+                    <input type="text" id="search-input" placeholder="化合物名 / 示性式" value="L-cysteine">
+                    <button id="search-clear" title="Clear text">
+                        <svg viewBox="0 0 24 24">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="search-submit" title="Search">
+                        <svg viewBox="0 0 24 24">
+                            <circle cx="11" cy="11" r="8"/>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div id="control-panel" class="ui-panel">
+                <div class="ui-group">
+                    <button class="icon-btn active" id="btn-stereo" title="Stereo Mode: Cross-eyed [s]">
+                        <svg viewBox="0 0 24 24"><line x1="5" y1="3" x2="19" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="19" y1="3" x2="5" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </button>
+                    <button class="icon-btn" id="btn-depth" title="Depth: Normal [d]">
+                        <svg viewBox="0 0 24 24">
+                            <polygon points="12 2 2 7 12 12 22 7 12 2" stroke="currentColor" stroke-width="2" fill="none"/>
+                            <polyline points="2 12 12 17 22 12" stroke="currentColor" stroke-width="2" fill="none"/>
+                            <polyline points="2 17 12 22 22 17" stroke="currentColor" stroke-width="2" fill="none"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="ui-group">
+                    <button class="icon-btn" id="btn-model" title="Model: Ball and Stick [m]">
+                        <svg viewBox="0 0 24 24">
+                            <circle cx="6" cy="6" r="3"/>
+                            <circle cx="18" cy="18" r="3"/>
+                            <line x1="8.12" y1="8.12" x2="15.88" y2="15.88"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="ui-group">
+                    <button class="icon-btn active" id="btn-bg" title="Background: Blue [b]">
+                        <svg viewBox="0 0 24 24">
+                            <rect id="bg-icon-rect" x="4" y="4" width="16" height="16" rx="2" fill="#eaf4ff" stroke="currentColor"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="ui-group">
+                    <button class="icon-btn" id="btn-gloss" title="Toggle Gloss [g]">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="btn-autorotate" title="Auto-Rotate: OFF [r]">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="ui-group">
+                    <button class="icon-btn" id="btn-ss" title="Screen Saver [Long-press/Right-click for settings]">
+                        <svg viewBox="0 0 24 24">
+                            <rect x="3" y="5" width="18" height="12" rx="2" stroke="currentColor" stroke-width="2" fill="none"/>
+                            <line x1="8" y1="21" x2="16" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            <line x1="12" y1="17" x2="12" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            <circle cx="12" cy="11" r="2.5" fill="currentColor"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="ss-overlay"></div>
+        <div id="ss-modal" class="ui-panel">
+            <div style="width:100%; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-light); padding-bottom:10px;">
+                <span style="font-weight:600; font-size:13px; letter-spacing:1px; color:var(--text-active);">Screensaver Settings</span>
+                <button id="ss-close" class="icon-btn" style="padding:2px;"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:6px; width:100%;">
+                <label style="font-size:11px; color:rgba(255,255,255,0.6);">化合物の名前リスト (日本語可、カンマ区切り)</label>
+                <textarea id="ss-compounds" style="background:rgba(255,255,255,0.05); border:1px solid var(--border-light); color:#fff; border-radius:12px; padding:10px; font-size:12px; outline:none; resize:none; height:70px; width:100%; font-family:monospace;"></textarea>
+            </div>
+
+            <div class="ss-row">
+                <label>順序</label>
+                <div class="ss-segment" data-key="order" id="seg-order">
+                    <button class="icon-btn" data-val="sequential" title="順番"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><polyline points="12 5 19 12 12 19" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    <button class="icon-btn" data-val="random" title="ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                </div>
+            </div>
+            
+            <div class="ss-row">
+                <label>表示時間 (秒)</label>
+                <input type="number" id="ss-interval" style="width:60px; background:rgba(255,255,255,0.1); border:none; color:#fff; border-radius:8px; padding:4px 8px; text-align:center; font-size:13px; outline:none;">
+            </div>
+
+            <div class="ss-row">
+                <label>回転速度 (度/秒)</label>
+                <input type="number" id="ss-speed" style="width:60px; background:rgba(255,255,255,0.1); border:none; color:#fff; border-radius:8px; padding:4px 8px; text-align:center; font-size:13px; outline:none;">
+            </div>
+            
+            <div class="ss-row">
+                <label>解除モード</label>
+                <div class="ss-segment" data-key="exitMode" id="seg-exit">
+                    <button class="icon-btn" data-val="normal" title="通常 (Tap)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg></button>
+                    <button class="icon-btn" data-val="strict" title="厳格 (W-Tap / Ctrl+Shift+P)"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+                </div>
+            </div>
+
+            <div class="ss-row">
+                <label>背景</label>
+                <div class="ss-segment" data-key="bg" id="seg-bg">
+                    <button class="icon-btn" data-val="random" title="ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    <button class="icon-btn" data-val="blue" title="Blue"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#eaf4ff" stroke="currentColor" stroke-width="1.5"/></svg></button>
+                    <button class="icon-btn" data-val="gray" title="Gray"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#dadada" stroke="currentColor" stroke-width="1.5"/></svg></button>
+                    <button class="icon-btn" data-val="white" title="White"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#ffffff" stroke="#cccccc" stroke-width="1.5"/></svg></button>
+                </div>
+            </div>
+
+            <div class="ss-row">
+                <label>モデル</label>
+                <div class="ss-segment" data-key="model" id="seg-model">
+                    <button class="icon-btn" data-val="random" title="ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    <button class="icon-btn" data-val="ballstick" title="Ball&Stick"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8.12" y1="8.12" x2="15.88" y2="15.88" stroke="currentColor" stroke-width="1.5"/></svg></button>
+                    <button class="icon-btn" data-val="spacefilling" title="SpaceFilling"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><circle cx="15" cy="15" r="5"/></svg></button>
+                    <button class="icon-btn" data-val="ghost" title="Ghost Mode"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="15" cy="15" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2" fill="currentColor"/><circle cx="15" cy="15" r="1.5" fill="currentColor"/></svg></button>
+                </div>
+            </div>
+
+            <div class="ss-row">
+                <label>立体視</label>
+                <div class="ss-segment" data-key="stereo" id="seg-stereo">
+                    <button class="icon-btn" data-val="random" title="ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    <button class="icon-btn" data-val="0" title="Cross"><svg viewBox="0 0 24 24"><line x1="5" y1="3" x2="19" y2="21" stroke="currentColor" stroke-width="2"/><line x1="19" y1="3" x2="5" y2="21" stroke="currentColor" stroke-width="2"/></svg></button>
+                    <button class="icon-btn" data-val="1" title="Parallel"><svg viewBox="0 0 24 24"><path d="M8 21V3M16 21V3" stroke="currentColor" stroke-width="2"/></svg></button>
+                    <button class="icon-btn" data-val="2" title="Single"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+                </div>
+            </div>
+
+            <div class="ss-row">
+                <label>深度</label>
+                <div class="ss-segment" data-key="depth" id="seg-depth">
+                    <button class="icon-btn" data-val="random" title="ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    <button class="icon-btn" data-val="0" title="Normal"><span style="font-size:12px;font-weight:bold;pointer-events:none;">N</span></button>
+                    <button class="icon-btn" data-val="1" title="Deep"><span style="font-size:12px;font-weight:bold;pointer-events:none;">D</span></button>
+                    <button class="icon-btn" data-val="2" title="Very Deep"><span style="font-size:12px;font-weight:bold;pointer-events:none;">VD</span></button>
+                </div>
+            </div>
+
+            <div class="ss-row">
+                <label>光沢</label>
+                <div class="ss-segment" data-key="gloss" id="seg-gloss">
+                    <button class="icon-btn" data-val="random" title="ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    <button class="icon-btn" data-val="true" title="ON"><svg viewBox="0 0 24 24"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
+                    <button class="icon-btn" data-val="false" title="OFF"><svg viewBox="0 0 24 24"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" opacity="0.3"/><line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2"/></svg></button>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 定数・システム設定データ
+        // ==========================================
+        const ELEMENT_DATA = {
+            'H':  { color: 0xffffff, radius: 1.20 },
+            'C':  { color: 0x555555, radius: 1.70 },
+            'N':  { color: 0x3050f8, radius: 1.55 },
+            'O':  { color: 0xff0d0d, radius: 1.52 },
+            'F':  { color: 0x90e050, radius: 1.47 },
+            'Cl': { color: 0x1ff01f, radius: 1.75 },
+            'Br': { color: 0xa62929, radius: 1.85 },
+            'I':  { color: 0x940094, radius: 1.98 },
+            'P':  { color: 0xff8000, radius: 1.80 },
+            'S':  { color: 0xffff30, radius: 1.80 },
+            'DEFAULT': { color: 0x888888, radius: 1.50 }
+        };
+
+        const BG_COLORS = {
+            'white': 0xffffff,
+            'gray': 0xdadada,
+            'blue': 0xeaf4ff
+        };
+
+        const STEREO_TITLES = ['Stereo: Cross-eyed [s]', 'Stereo: Parallel [s]', 'Stereo: Single [s]'];
+        const DEPTH_VALUES = [0.28, 0.55, 0.85];
+        const DEPTH_TITLES = ['Depth: Normal [d]', 'Depth: Deep [d]', 'Depth: Very Deep [d]'];
+        const ROTATE_SPEEDS = [0, 18.0, 30.0]; 
+        const ROTATE_TITLES = ['Auto-Rotate: OFF [r]', 'Auto-Rotate: 10s/180° [r]', 'Auto-Rotate: 6s/180° [r]'];
+        
+        const MODEL_TITLES = { 
+            'ballstick': 'Model: Ball and Stick [m]', 
+            'spacefilling': 'Model: Space Filling [m]',
+            'ghost': 'Model: Ghost Mode [m]'
+        };
+
+        const SVG_BALLSTICK = `<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8.12" y1="8.12" x2="15.88" y2="15.88"/></svg>`;
+        const SVG_SPACEFILLING = `<svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><circle cx="15" cy="15" r="5"/></svg>`;
+        const SVG_GHOST = `<svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="15" cy="15" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2" fill="currentColor"/><circle cx="15" cy="15" r="1.5" fill="currentColor"/><line x1="10" y1="10" x2="15" y2="15" stroke="currentColor" stroke-width="1.5"/></svg>`;
+
+        // ==========================================
+        // アプリケーション状態変数
+        // ==========================================
+        let currentStereoIndex = 0; 
+        let currentRenderMode = 'ballstick';
+        let currentBgMode = 'blue';
+        let currentGlossMode = false;
+        let currentDepthIndex = 0;
+        let currentRotateIndex = 0;
+        let isAutoRotating = false;
+        let currentRotateSpeed = 0;
+
+        let wakeLock = null;
+        let moleculeSceneObjects = [];
+        let offsetX = 0;
+        let offsetY = 0;
+
+        // ==========================================
+        // Three.js 描画コアシステムの構築
+        // ==========================================
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(BG_COLORS[currentBgMode]);
+
+        const moleculeGroup = new THREE.Group();
+        scene.add(moleculeGroup);
+
+        const mainCamera = new THREE.PerspectiveCamera(45, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
+        mainCamera.position.set(0, 0, 15);
+        
+        const cameraL = new THREE.PerspectiveCamera(45, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
+        const cameraR = new THREE.PerspectiveCamera(45, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.autoClear = false;
+        container.appendChild(renderer.domElement);
+
+        let controls;
+        try {
+            controls = new THREE.OrbitControls(mainCamera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.enablePan = false; 
+            controls.minPolarAngle = 0.08;
+            controls.maxPolarAngle = Math.PI - 0.08;
+            controls.autoRotate = false; 
+            
+            if (THREE.MOUSE) {
+                controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: null };
+            }
+            if (THREE.TOUCH) {
+                controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: null };
+            }
+        } catch (e) {
+            controls = { update: () => {}, target: new THREE.Vector3() };
+        }
+
+        // ライティング設定
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.6);
+        dirLight1.position.set(0, 0, 15);
+        scene.add(dirLight1);
+
+        const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.2);
+        dirLight2.position.set(-10, -15, -10);
+        scene.add(dirLight2);
+
+        // ==========================================
+        // スクリーンセーバー(自動再生)システム管理
+        // ==========================================
+        let ssSettings = JSON.parse(localStorage.getItem('ss_settings')) || {};
+        if (!ssSettings.compounds) ssSettings.compounds = "cubane, adamantane, caffeine, cholesterol, morphine, strychnine, sucrose, camphor, porphine, penicillin v";
+        if (!ssSettings.order) ssSettings.order = "sequential";
+        if (typeof ssSettings.interval === 'undefined') ssSettings.interval = 15;
+        if (typeof ssSettings.speed === 'undefined') ssSettings.speed = 18;
+        if (!ssSettings.exitMode) ssSettings.exitMode = "normal";
+        if (!ssSettings.bg) ssSettings.bg = "random";
+        if (!ssSettings.model) ssSettings.model = "random";
+        if (!ssSettings.stereo) ssSettings.stereo = "random";
+        if (!ssSettings.depth) ssSettings.depth = "random";
+        if (!ssSettings.gloss) ssSettings.gloss = "random";
+        
+        let ssActive = false;
+        let ssTimer = null;
+        let ssCurrentIndex = 0;
+        let ssFailCount = 0;
+        let previousState = {};
+
+        const SS_VALS = {
+            bg: ['blue', 'gray', 'white'],
+            model: ['ballstick', 'spacefilling', 'ghost']
+        };
+
+        function startScreenSaver() {
+            if (ssActive) return;
+            ssActive = true;
+            
+            // ★解除用バリアを展開
+            const ssOverlay = document.getElementById('ss-exit-overlay');
+            ssOverlay.style.display = 'block';
+            ssOverlay.dataset.exiting = "false";
+            ssPointersDown = 0;
+            ssClickCount = 0;
+
+            // ★フルスクリーン化 (クロスブラウザ対応)
+            const elem = document.documentElement;
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                if (elem.requestFullscreen) {
+                    elem.requestFullscreen().catch(err => { console.warn(`Fullscreen API Error: ${err.message}`); });
+                } else if (elem.webkitRequestFullscreen) {
+                    elem.webkitRequestFullscreen();
+                }
+            }
+            
+            const uiWrapper = document.getElementById('ui-wrapper');
+            uiWrapper.style.opacity = '0';
+            uiWrapper.style.pointerEvents = 'none';
+            document.getElementById('label-left').style.opacity = '0.3';
+            
+            previousState = {
+                bg: currentBgMode,
+                model: currentRenderMode,
+                stereo: currentStereoIndex,
+                depth: currentDepthIndex,
+                gloss: currentGlossMode,
+                rotateIndex: currentRotateIndex
+            };
+            
+            isAutoRotating = true;
+            currentRotateSpeed = ssSettings.speed;
+            updateWakeLock();
+            
+            loadNextSSMolecule();
+        }
+
+        function stopScreenSaver() {
+            if (!ssActive) return;
+            ssActive = false;
+            clearTimeout(ssTimer);
+            ssTimer = null;
+            
+            // ★防壁を消去
+            document.getElementById('ss-exit-overlay').style.display = 'none';
+
+            // ★フルスクリーン解除
+            if (document.fullscreenElement || document.webkitFullscreenElement) {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen().catch(err => { console.warn(`Exit Fullscreen API Error: ${err.message}`); });
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
+            }
+            
+            const uiWrapper = document.getElementById('ui-wrapper');
+            uiWrapper.style.opacity = '1';
+            uiWrapper.style.pointerEvents = 'auto';
+            document.getElementById('label-left').style.opacity = '1';
+            
+            currentBgMode = previousState.bg;
+            currentRenderMode = previousState.model;
+            currentStereoIndex = previousState.stereo;
+            currentDepthIndex = previousState.depth;
+            currentGlossMode = previousState.gloss;
+            currentRotateIndex = previousState.rotateIndex;
+            
+            if (currentRotateIndex === 0) {
+                isAutoRotating = false;
+                currentRotateSpeed = 0;
+            } else {
+                isAutoRotating = true;
+                currentRotateSpeed = ROTATE_SPEEDS[currentRotateIndex];
+            }
+            
+            updateStereoMode();
+            updateModelMode();
+            updateBgMode(currentBgMode);
+            
+            const btnGloss = document.getElementById('btn-gloss');
+            if(currentGlossMode) btnGloss.classList.add('active');
+            else btnGloss.classList.remove('active');
+            
+            const btnAutoRotate = document.getElementById('btn-autorotate');
+            btnAutoRotate.classList.remove('active', 'level-2');
+            if (currentRotateIndex === 1) btnAutoRotate.classList.add('active');
+            if (currentRotateIndex === 2) btnAutoRotate.classList.add('active', 'level-2');
+            
+            if (window.currentSdfData) buildMoleculeGeometry(window.currentSdfData, true);
+            updateWakeLock();
+
+            // ★タッチ変数の完全リセット（残留ゴースト防止）
+            activeTouches.clear();
+            isRightDragging = false;
+            isTwoFingerDragging = false;
+            lastPinchDistance = 0;
+
+            // ★キャンバスサイズの強制再計算を連打（iOSのリサイズ遅延対策）
+            setTimeout(resizeCanvas, 50);
+            setTimeout(resizeCanvas, 300);
+            setTimeout(resizeCanvas, 800);
+        }
+
+        function loadNextSSMolecule() {
+            if (!ssActive) return;
+            
+            const list = ssSettings.compounds.split(/,|\n/).map(s => s.trim()).filter(s => s.length > 0);
+            if (list.length === 0) list.push('benzene');
+            
+            if (ssFailCount >= list.length) {
+                ssFailCount = 0;
+                fetchMoleculeData('benzene', true); 
+                return;
+            }
+
+            let comp = '';
+            if (ssSettings.order === 'random') {
+                comp = list[Math.floor(Math.random() * list.length)];
+            } else {
+                comp = list[ssCurrentIndex % list.length];
+                ssCurrentIndex++;
+            }
+            
+            currentBgMode = (ssSettings.bg === 'random') ? SS_VALS.bg[Math.floor(Math.random()*3)] : ssSettings.bg;
+            currentRenderMode = (ssSettings.model === 'random') ? SS_VALS.model[Math.floor(Math.random()*3)] : ssSettings.model;
+            currentStereoIndex = (ssSettings.stereo === 'random') ? Math.floor(Math.random()*3) : parseInt(ssSettings.stereo);
+            currentDepthIndex = (ssSettings.depth === 'random') ? Math.floor(Math.random()*3) : parseInt(ssSettings.depth);
+            currentGlossMode = (ssSettings.gloss === 'random') ? (Math.random() > 0.5) : (ssSettings.gloss === 'true');
+            
+            scene.background.setHex(BG_COLORS[currentBgMode]);
+            updateStereoCameras();
+            
+            fetchMoleculeData(comp, true);
+        }
+
+        // ==========================================
+        // ロジック・処理関数群
+        // ==========================================
+        let toastTimeout;
+        function showNotification(message) {
+            const toast = document.getElementById('toast-notification');
+            toast.textContent = message;
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.opacity = '1'; }, 10);
+            
+            if (toastTimeout) clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => { toast.style.display = 'none'; }, 400);
+            }, 4000);
+        }
+
+        function parseSDF(sdfText) {
+            const lines = sdfText.split(/\r?\n/);
+            if (lines.length < 4) throw new Error("Invalid SDF format");
+
+            const countsLine = lines[3];
+            const atomCount = parseInt(countsLine.substring(0, 3).trim());
+            const bondCount = parseInt(countsLine.substring(3, 6).trim());
+
+            if (isNaN(atomCount)) throw new Error("Failed to parse atom counts");
+
+            const atoms = [];
+            for (let i = 0; i < atomCount; i++) {
+                const line = lines[4 + i];
+                if (!line) continue;
+                const x = parseFloat(line.substring(0, 10).trim());
+                const y = parseFloat(line.substring(10, 20).trim());
+                const z = parseFloat(line.substring(20, 30).trim());
+                const element = line.substring(31, 34).trim();
+                atoms.push({ x, y, z, element });
+            }
+
+            const bonds = [];
+            const bondStartLine = 4 + atomCount;
+            for (let i = 0; i < bondCount; i++) {
+                const line = lines[bondStartLine + i];
+                if (!line) continue;
+                const a = parseInt(line.substring(0, 3).trim()) - 1;
+                const b = parseInt(line.substring(3, 6).trim()) - 1;
+                const order = parseInt(line.substring(6, 9).trim());
+                bonds.push({ a, b, order });
+            }
+
+            let formula = null;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes('PUBCHEM_MOLECULAR_FORMULA')) {
+                    if (lines[i+1]) {
+                        formula = lines[i+1].trim();
+                    }
+                    break;
+                }
+            }
+            return { atoms, bonds, formula };
+        }
+
+        function buildMoleculeGeometry(data, keepOffset = false) {
+            moleculeSceneObjects.forEach(obj => {
+                moleculeGroup.remove(obj);
+                if(obj.geometry) obj.geometry.dispose();
+                if(obj.material) obj.material.dispose();
+            });
+            moleculeSceneObjects = [];
+
+            if (!data.atoms || data.atoms.length === 0) return;
+
+            if (currentBgMode === 'white') {
+                ELEMENT_DATA['H'].color = 0xf2f7ff; 
+            } else {
+                ELEMENT_DATA['H'].color = 0xffffff;
+            }
+
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+            let minZ = Infinity, maxZ = -Infinity;
+
+            data.atoms.forEach(a => {
+                if (a.x < minX) minX = a.x;
+                if (a.x > maxX) maxX = a.x;
+                if (a.y < minY) minY = a.y;
+                if (a.y > maxY) maxY = a.y;
+                if (a.z < minZ) minZ = a.z;
+                if (a.z > maxZ) maxZ = a.z;
+            });
+
+            const geometricCenter = new THREE.Vector3(
+                (minX + maxX) / 2,
+                (minY + maxY) / 2,
+                (minZ + maxZ) / 2
+            );
+
+            const atomPositions = data.atoms.map(a => {
+                return new THREE.Vector3(a.x, a.y, a.z).sub(geometricCenter);
+            });
+
+            const roughnessValue = currentGlossMode ? 0.2 : 0.9;
+            const metalnessValue = currentGlossMode ? 0.1 : 0.0;
+
+            // 原子（不透明部分）の描画
+            data.atoms.forEach((atom, index) => {
+                const elementInfo = ELEMENT_DATA[atom.element] || ELEMENT_DATA['DEFAULT'];
+                
+                if (currentRenderMode === 'ballstick' || currentRenderMode === 'ghost') {
+                    let radius = elementInfo.radius * 0.35;
+                    
+                    if (currentRenderMode === 'ballstick') radius *= 0.85; 
+                    else if (currentRenderMode === 'ghost') radius *= 0.5; 
+                    
+                    const sphereGeom = new THREE.SphereGeometry(radius, 32, 32);
+                    const sphereMat = new THREE.MeshStandardMaterial({
+                        color: elementInfo.color,
+                        roughness: roughnessValue,
+                        metalness: metalnessValue
+                    });
+                    const mesh = new THREE.Mesh(sphereGeom, sphereMat);
+                    mesh.position.copy(atomPositions[index]);
+                    moleculeGroup.add(mesh);
+                    moleculeSceneObjects.push(mesh);
+                } else if (currentRenderMode === 'spacefilling') {
+                    const radius = elementInfo.radius;
+                    const sphereGeom = new THREE.SphereGeometry(radius, 32, 32);
+                    const sphereMat = new THREE.MeshStandardMaterial({
+                        color: elementInfo.color,
+                        roughness: roughnessValue,
+                        metalness: metalnessValue
+                    });
+                    const mesh = new THREE.Mesh(sphereGeom, sphereMat);
+                    mesh.position.copy(atomPositions[index]);
+                    moleculeGroup.add(mesh);
+                    moleculeSceneObjects.push(mesh);
+                }
+            });
+
+            // 結合線の描画
+            if (currentRenderMode === 'ballstick' || currentRenderMode === 'ghost') {
+                const bondMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x999999,
+                    roughness: roughnessValue,
+                    metalness: metalnessValue
+                });
+
+                data.bonds.forEach(bond => {
+                    const pA = atomPositions[bond.a];
+                    const pB = atomPositions[bond.b];
+
+                    const direction = new THREE.Vector3().subVectors(pB, pA);
+                    const length = direction.length();
+                    direction.normalize();
+
+                    const midPoint = new THREE.Vector3().addVectors(pA, pB).multiplyScalar(0.5);
+                    const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+                    const radius = 0.08;
+
+                    const createCylinderMesh = (offsetVector) => {
+                        const cylinderGeom = new THREE.CylinderGeometry(radius, radius, length, 16);
+                        const mesh = new THREE.Mesh(cylinderGeom, bondMaterial);
+                        mesh.position.copy(midPoint);
+                        if (offsetVector) mesh.position.add(offsetVector);
+                        mesh.quaternion.copy(quaternion);
+                        moleculeGroup.add(mesh);
+                        moleculeSceneObjects.push(mesh);
+                    };
+
+                    if (bond.order === 1) {
+                        createCylinderMesh(null);
+                    } else if (bond.order === 2) {
+                        let upVector = new THREE.Vector3(0, 1, 0);
+                        if (Math.abs(direction.dot(upVector)) > 0.95) { upVector.set(1, 0, 0); }
+                        
+                        let baseOffset = new THREE.Vector3().crossVectors(direction, upVector).normalize();
+                        baseOffset.crossVectors(direction, baseOffset.clone()).normalize();
+                        
+                        const offsetDir = baseOffset.multiplyScalar(0.12);
+                        createCylinderMesh(offsetDir);
+                        createCylinderMesh(offsetDir.clone().negate());
+                    } else if (bond.order === 3) {
+                        let upVector = new THREE.Vector3(0, 1, 0);
+                        if (Math.abs(direction.dot(upVector)) > 0.95) { upVector.set(1, 0, 0); }
+                        
+                        let baseOffset = new THREE.Vector3().crossVectors(direction, upVector).normalize();
+                        baseOffset.crossVectors(direction, baseOffset.clone()).normalize();
+                        
+                        const offsetDir = baseOffset.multiplyScalar(0.18);
+                        createCylinderMesh(null);
+                        createCylinderMesh(offsetDir);
+                        createCylinderMesh(offsetDir.clone().negate());
+                    } else {
+                        createCylinderMesh(null);
+                    }
+                });
+            }
+
+            // 原子（半透明部分: Ghostモードの外殻）の描画
+            if (currentRenderMode === 'ghost') {
+                data.atoms.forEach((atom, index) => {
+                    const elementInfo = ELEMENT_DATA[atom.element] || ELEMENT_DATA['DEFAULT'];
+                    const radius = elementInfo.radius;
+                    const sphereGeom = new THREE.SphereGeometry(radius, 32, 32);
+                    const sphereMat = new THREE.MeshStandardMaterial({
+                        color: elementInfo.color,
+                        roughness: roughnessValue,
+                        metalness: metalnessValue,
+                        transparent: true,
+                        opacity: 0.3,
+                        depthWrite: false
+                    });
+                    const mesh = new THREE.Mesh(sphereGeom, sphereMat);
+                    mesh.position.copy(atomPositions[index]);
+                    moleculeGroup.add(mesh);
+                    moleculeSceneObjects.push(mesh);
+                });
+            }
+
+            // オートスケールの計算
+            let maxDistance = 0;
+            data.atoms.forEach((atom, index) => {
+                const elementInfo = ELEMENT_DATA[atom.element] || ELEMENT_DATA['DEFAULT'];
+                const dist = atomPositions[index].length() + elementInfo.radius;
+                if (dist > maxDistance) maxDistance = dist;
+            });
+
+            if (!keepOffset) {
+                offsetX = 0;
+                offsetY = 0;
+                moleculeGroup.rotation.set(0, 0, 0);
+                controls.target.set(0, 0, 0);
+                
+                const fovRad = (mainCamera.fov / 2) * THREE.MathUtils.DEG2RAD;
+                let targetDistance = (maxDistance / Math.sin(fovRad)) * 1.3; 
+                targetDistance = Math.max(targetDistance, 10); 
+                
+                const dir = new THREE.Vector3().subVectors(mainCamera.position, controls.target).normalize();
+                mainCamera.position.copy(controls.target).add(dir.multiplyScalar(targetDistance));
+            }
+        }
+
+        async function fetchMoleculeData(query, isSS = false) {
+            let cleanQuery = query.trim();
+            const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(cleanQuery);
+            
+            if (hasJapanese) {
+                try {
+                    const wikiUrl = `https://ja.wikipedia.org/w/api.php?action=query&prop=langlinks&lllang=en&format=json&origin=*&redirects=1&titles=${encodeURIComponent(cleanQuery)}`;
+                    const wikiRes = await fetch(wikiUrl);
+                    if (wikiRes.ok) {
+                        const wikiData = await wikiRes.json();
+                        const pages = wikiData.query.pages;
+                        for (const id in pages) {
+                            if (pages[id].langlinks && pages[id].langlinks.length > 0) {
+                                cleanQuery = pages[id].langlinks[0]['*'];
+                                break;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Wikipedia translation bridge failed, falling back to original query.", e);
+                }
+            }
+
+            const cleanQueryEncoded = encodeURIComponent(cleanQuery);
+            const url = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${cleanQueryEncoded}/SDF?record_type=3d`;
+            
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error("指定された化合物・示性式が見つかりません。");
+                
+                const sdfText = await response.text();
+                const parsedData = parseSDF(sdfText);
+                buildMoleculeGeometry(parsedData, false); 
+                window.currentSdfData = parsedData;
+
+                let labelText = cleanQuery;
+                if (parsedData.formula) labelText += ` (${parsedData.formula})`;
+                document.getElementById('label-left').textContent = labelText;
+                
+                if (isSS) {
+                    ssFailCount = 0;
+                    ssTimer = setTimeout(loadNextSSMolecule, ssSettings.interval * 1000);
+                }
+
+            } catch (error) {
+                if (isSS) {
+                    ssFailCount++;
+                    ssTimer = setTimeout(loadNextSSMolecule, 1000); 
+                } else {
+                    showNotification(error.message);
+                }
+            }
+        }
+
+        function updateStereoCameras() {
+            const target = controls.target; 
+            const camPos = mainCamera.position;
+
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(mainCamera.quaternion).normalize();
+            const up = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
+
+            const eyeSeparation = DEPTH_VALUES[currentDepthIndex];
+
+            cameraL.position.copy(camPos).addScaledVector(right, -eyeSeparation / 2);
+            cameraR.position.copy(camPos).addScaledVector(right, eyeSeparation / 2);
+
+            cameraL.up.copy(up);
+            cameraR.up.copy(up);
+
+            cameraL.lookAt(target);
+            cameraR.lookAt(target);
+        }
+
+        // ==========================================
+        // メインアニメーションループ
+        // ==========================================
+        const clock = new THREE.Clock();
+        const controlPanelElement = document.getElementById('control-panel');
+        const searchPanelElement = document.getElementById('search-panel');
+        const labelLeftElement = document.getElementById('label-left');
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            controls.update();
+
+            if (isAutoRotating) {
+                const angle = THREE.MathUtils.degToRad(currentRotateSpeed) * delta;
+                const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
+                moleculeGroup.rotateOnWorldAxis(cameraUp, angle);
+                
+                if (ssActive) {
+                    const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(mainCamera.quaternion).normalize();
+                    moleculeGroup.rotateOnWorldAxis(cameraRight, angle * 0.35);
+                }
+            }
+
+            updateStereoCameras();
+            dirLight1.position.copy(mainCamera.position);
+
+            let panelWidth = 0;
+            const isMobileLandscape = window.matchMedia("(max-width: 1366px) and (orientation: landscape), (pointer: coarse) and (orientation: landscape)").matches;
+
+            if (isMobileLandscape) {
+                panelWidth = controlPanelElement.getBoundingClientRect().width;
+                const searchLeftPos = panelWidth + (window.innerWidth - panelWidth) / 2;
+                searchPanelElement.style.left = `${searchLeftPos}px`;
+                labelLeftElement.style.left = `${panelWidth + 20}px`;
+            } else {
+                panelWidth = 0;
+                searchPanelElement.style.left = '';
+                labelLeftElement.style.left = '20px';
+            }
+
+            const renderWidth = window.innerWidth - panelWidth;
+            const height = window.innerHeight;
+
+            renderer.clear();
+
+            if (currentStereoIndex === 2) {
+                const aspect = renderWidth / height;
+                mainCamera.aspect = aspect;
+                mainCamera.updateProjectionMatrix();
+
+                mainCamera.projectionMatrix.elements[8] = (offsetX / renderWidth);
+                mainCamera.projectionMatrix.elements[9] = (offsetY / height);
+
+                renderer.setViewport(panelWidth, 0, renderWidth, height);
+                renderer.setScissor(panelWidth, 0, renderWidth, height);
+                renderer.setScissorTest(true);
+                renderer.render(scene, mainCamera);
+            } else {
+                const halfWidth = renderWidth / 2;
+                const aspect = halfWidth / height;
+                
+                cameraL.aspect = aspect;
+                cameraL.updateProjectionMatrix();
+                cameraR.aspect = aspect;
+                cameraR.updateProjectionMatrix();
+
+                cameraL.projectionMatrix.elements[8] = (offsetX / halfWidth);
+                cameraL.projectionMatrix.elements[9] = (offsetY / height);
+                cameraR.projectionMatrix.elements[8] = (offsetX / halfWidth);
+                cameraR.projectionMatrix.elements[9] = (offsetY / height);
+
+                const leftEyeCameraActive = (currentStereoIndex === 1) ? cameraL : cameraR;
+                const rightEyeCameraActive = (currentStereoIndex === 1) ? cameraR : cameraL;
+
+                renderer.setViewport(panelWidth, 0, halfWidth, height);
+                renderer.setScissor(panelWidth, 0, halfWidth, height);
+                renderer.setScissorTest(true);
+                renderer.render(scene, leftEyeCameraActive);
+
+                renderer.setViewport(panelWidth + halfWidth, 0, halfWidth, height);
+                renderer.setScissor(panelWidth + halfWidth, 0, halfWidth, height);
+                renderer.setScissorTest(true);
+                renderer.render(scene, rightEyeCameraActive);
+            }
+        }
+
+        // ==========================================
+        // リサイズ・フルスクリーン検知の堅牢化
+        // ==========================================
+        function resizeCanvas() {
+            if (renderer) renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        function handleFullscreenChange() {
+            setTimeout(resizeCanvas, 100);
+            setTimeout(resizeCanvas, 500);
+            setTimeout(resizeCanvas, 1000);
+            
+            const isFullscreen = document.fullscreenElement || document.webkitFullscreenElement;
+            // ネイティブ機能(×ボタンなど)でフルスクリーンを解除された場合、SSも自動終了する
+            if (!isFullscreen && ssActive) {
+                stopScreenSaver();
+            }
+        }
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+        // ==========================================
+        // マウス・タッチポインターイベントハンドリング
+        // ==========================================
+        let isRightDragging = false;
+        let isTwoFingerDragging = false;
+        let lastPointerX = 0;
+        let lastPointerY = 0;
+        let lastPinchDistance = 0; 
+        const activeTouches = new Map();
+
+        renderer.domElement.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse' && e.button === 2) {
+                isRightDragging = true;
+                lastPointerX = e.clientX;
+                lastPointerY = e.clientY;
+            }
+            else if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+                activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                if (activeTouches.size === 2) {
+                    isTwoFingerDragging = true;
+                    const pts = Array.from(activeTouches.values());
+                    lastPointerX = (pts[0].x + pts[1].x) / 2;
+                    lastPointerY = (pts[0].y + pts[1].y) / 2;
+                    lastPinchDistance = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+                }
+            }
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (e.pointerType === 'mouse' && isRightDragging) {
+                offsetX -= e.clientX - lastPointerX;
+                offsetY += e.clientY - lastPointerY; 
+                lastPointerX = e.clientX;
+                lastPointerY = e.clientY;
+            }
+            else if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+                if (activeTouches.has(e.pointerId)) {
+                    activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                }
+                if (isTwoFingerDragging && activeTouches.size === 2) {
+                    const pts = Array.from(activeTouches.values());
+                    const cx = (pts[0].x + pts[1].x) / 2;
+                    const cy = (pts[0].y + pts[1].y) / 2;
+                    const currentDistance = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+
+                    offsetX -= cx - lastPointerX;
+                    offsetY += cy - lastPointerY; 
+                    lastPointerX = cx;
+                    lastPointerY = cy;
+
+                    if (lastPinchDistance > 0) {
+                        const zoomDelta = currentDistance - lastPinchDistance;
+                        const dir = new THREE.Vector3().subVectors(mainCamera.position, controls.target);
+                        const dist = dir.length();
+                        dir.normalize();
+                        
+                        const newDist = Math.max(2.0, Math.min(60.0, dist - zoomDelta * 0.08));
+                        mainCamera.position.copy(controls.target).add(dir.multiplyScalar(newDist));
+                    }
+                    lastPinchDistance = currentDistance;
+                }
+            }
+        });
+
+        const handlePointerUp = (e) => {
+            if (e.pointerType === 'mouse' && e.button === 2) isRightDragging = false;
+            else if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+                activeTouches.delete(e.pointerId);
+                if (activeTouches.size < 2) {
+                    isTwoFingerDragging = false;
+                    lastPinchDistance = 0;
+                }
+            }
+        };
+
+        window.addEventListener('pointerup', handlePointerUp);
+        window.addEventListener('pointercancel', handlePointerUp);
+        container.addEventListener('contextmenu', e => e.preventDefault());
+
+
+        // ==========================================
+        // ★完全防壁: SS解除の「遅延解除バリア」処理
+        // ==========================================
+        let ssPointersDown = 0;
+        let ssClickCount = 0;
+        let ssClickTimer = null;
+        const ssOverlay = document.getElementById('ss-exit-overlay');
+
+        ssOverlay.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            ssPointersDown++;
+
+            if (!ssActive) return;
+            
+            if (ssSettings.exitMode === 'strict') {
+                ssClickCount++;
+                if (ssClickCount === 1) ssClickTimer = setTimeout(() => { ssClickCount = 0; }, 500);
+                else if (ssClickCount >= 2) {
+                    clearTimeout(ssClickTimer);
+                    ssOverlay.dataset.exiting = "true";
+                }
+            } else {
+                ssOverlay.dataset.exiting = "true";
+            }
+        });
+
+        ssOverlay.addEventListener('pointermove', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        const handleSSPointerUp = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (ssPointersDown > 0) ssPointersDown--;
+            
+            // 指がすべて画面から離れた瞬間にのみバリアを解除し、キャンバス操作を復帰させる
+            if (ssPointersDown <= 0) {
+                ssPointersDown = 0; 
+                if (ssOverlay.dataset.exiting === "true") {
+                    ssOverlay.dataset.exiting = "false";
+                    stopScreenSaver();
+                }
+            }
+        };
+
+        ssOverlay.addEventListener('pointerup', handleSSPointerUp);
+        ssOverlay.addEventListener('pointercancel', handleSSPointerUp);
+
+
+        // ==========================================
+        // UI操作・入力系コントロールイベント
+        // ==========================================
+        const searchInput = document.getElementById('search-input');
+        const searchClear = document.getElementById('search-clear');
+
+        searchInput.addEventListener('input', () => {
+            if (searchInput.value.length > 0) searchClear.style.display = 'inline-flex';
+            else searchClear.style.display = 'none';
+        });
+
+        searchInput.addEventListener('blur', () => { window.scrollTo(0, 0); });
+
+        searchClear.addEventListener('click', () => {
+            searchInput.value = '';
+            searchClear.style.display = 'none';
+            searchInput.focus();
+        });
+
+        document.getElementById('search-submit').addEventListener('click', () => {
+            const query = searchInput.value;
+            if (query) { fetchMoleculeData(query); searchInput.blur(); }
+        });
+        
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const query = searchInput.value;
+                if (query) { fetchMoleculeData(query); searchInput.blur(); }
+            }
+        });
+
+        const btnStereo = document.getElementById('btn-stereo');
+        function updateStereoMode() {
+            btnStereo.title = STEREO_TITLES[currentStereoIndex];
+            btnStereo.classList.remove('active', 'level-2');
+            
+            if (currentStereoIndex === 2) {
+                btnStereo.innerHTML = `<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+            } else if (currentStereoIndex === 0) {
+                btnStereo.classList.add('active');
+                btnStereo.innerHTML = `<svg viewBox="0 0 24 24"><line x1="5" y1="3" x2="19" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="19" y1="3" x2="5" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+            } else if (currentStereoIndex === 1) {
+                btnStereo.classList.add('active', 'level-2');
+                btnStereo.innerHTML = `<svg viewBox="0 0 24 24"><path d="M8 21V3M16 21V3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+            }
+        }
+        btnStereo.addEventListener('click', () => { currentStereoIndex = (currentStereoIndex + 1) % 3; updateStereoMode(); });
+
+        const btnDepth = document.getElementById('btn-depth');
+        btnDepth.addEventListener('click', () => {
+            currentDepthIndex = (currentDepthIndex + 1) % 3;
+            btnDepth.title = DEPTH_TITLES[currentDepthIndex];
+            btnDepth.classList.remove('active', 'level-2');
+            if (currentDepthIndex === 1) btnDepth.classList.add('active');
+            if (currentDepthIndex === 2) btnDepth.classList.add('active', 'level-2');
+        });
+
+        const btnModel = document.getElementById('btn-model');
+        function updateModelMode() {
+            btnModel.title = MODEL_TITLES[currentRenderMode];
+            btnModel.classList.remove('level-2', 'active');
+            if (currentRenderMode === 'ballstick') {
+                btnModel.innerHTML = SVG_BALLSTICK;
+            } else if (currentRenderMode === 'spacefilling') {
+                btnModel.innerHTML = SVG_SPACEFILLING;
+                btnModel.classList.add('level-2');
+            } else if (currentRenderMode === 'ghost') {
+                btnModel.innerHTML = SVG_GHOST;
+                btnModel.classList.add('active');
+            }
+        }
+        btnModel.addEventListener('click', () => {
+            if (currentRenderMode === 'ballstick') currentRenderMode = 'spacefilling';
+            else if (currentRenderMode === 'spacefilling') currentRenderMode = 'ghost';
+            else currentRenderMode = 'ballstick';
+            updateModelMode();
+            if (window.currentSdfData) buildMoleculeGeometry(window.currentSdfData, true); 
+        });
+
+        const btnBg = document.getElementById('btn-bg');
+        const bgIconRect = document.getElementById('bg-icon-rect');
+        function updateBgMode(mode) {
+            currentBgMode = mode;
+            scene.background.setHex(BG_COLORS[mode]);
+            let fillHex = '#dadada';
+            let titleText = 'Background: Gray [b]';
+            if (mode === 'white') { fillHex = '#ffffff'; titleText = 'Background: White [b]'; } 
+            else if (mode === 'blue') { fillHex = '#eaf4ff'; titleText = 'Background: Blue [b]'; }
+            
+            btnBg.title = titleText;
+            bgIconRect.setAttribute('fill', fillHex);
+            bgIconRect.setAttribute('stroke', mode === 'white' ? '#cccccc' : 'currentColor');
+            if (window.currentSdfData) buildMoleculeGeometry(window.currentSdfData, true); 
+        }
+        btnBg.addEventListener('click', () => {
+            if (currentBgMode === 'blue') updateBgMode('gray');
+            else if (currentBgMode === 'gray') updateBgMode('white');
+            else updateBgMode('blue');
+        });
+
+        const btnGloss = document.getElementById('btn-gloss');
+        if(currentGlossMode) btnGloss.classList.add('active');
+        else btnGloss.classList.remove('active');
+        btnGloss.addEventListener('click', () => {
+            currentGlossMode = !currentGlossMode;
+            if (currentGlossMode) btnGloss.classList.add('active');
+            else btnGloss.classList.remove('active');
+            if (window.currentSdfData) buildMoleculeGeometry(window.currentSdfData, true); 
+        });
+
+        const btnAutoRotate = document.getElementById('btn-autorotate');
+        async function updateWakeLock() {
+            if ('wakeLock' in navigator) {
+                if (isAutoRotating && !wakeLock) {
+                    try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
+                } else if (!isAutoRotating && wakeLock) {
+                    wakeLock.release().then(() => { wakeLock = null; });
+                }
+            }
+        }
+        document.addEventListener('visibilitychange', () => {
+            if (wakeLock !== null && document.visibilityState === 'visible' && isAutoRotating) {
+                navigator.wakeLock.request('screen').then(wl => wakeLock = wl).catch(() => {});
+            }
+        });
+        btnAutoRotate.addEventListener('click', () => {
+            currentRotateIndex = (currentRotateIndex + 1) % 3;
+            btnAutoRotate.title = ROTATE_TITLES[currentRotateIndex];
+            btnAutoRotate.classList.remove('active', 'level-2');
+            
+            if (currentRotateIndex === 0) {
+                isAutoRotating = false; currentRotateSpeed = 0;
+            } else {
+                isAutoRotating = true; currentRotateSpeed = ROTATE_SPEEDS[currentRotateIndex];
+                if (currentRotateIndex === 1) btnAutoRotate.classList.add('active'); 
+                if (currentRotateIndex === 2) btnAutoRotate.classList.add('active', 'level-2'); 
+            }
+            updateWakeLock();
+        });
+
+        // SS UI & Modal logic
+        const btnSS = document.getElementById('btn-ss');
+        let ssPressTimer;
+        let isLongPress = false;
+
+        btnSS.addEventListener('click', () => { startScreenSaver(); });
+        btnSS.addEventListener('contextmenu', (e) => { e.preventDefault(); openSSModal(); });
+        btnSS.addEventListener('touchstart', (e) => {
+            isLongPress = false;
+            ssPressTimer = setTimeout(() => { isLongPress = true; openSSModal(); }, 500);
+        }, {passive: false});
+        btnSS.addEventListener('touchend', (e) => {
+            clearTimeout(ssPressTimer);
+            if (isLongPress) e.preventDefault(); 
+        });
+
+        function openSSModal() {
+            document.getElementById('ss-compounds').value = ssSettings.compounds;
+            document.getElementById('ss-interval').value = ssSettings.interval;
+            document.getElementById('ss-speed').value = ssSettings.speed;
+            
+            const updateSeg = (id, val) => {
+                const seg = document.getElementById(id);
+                seg.querySelectorAll('.icon-btn').forEach(btn => {
+                    if (btn.dataset.val === String(val)) btn.classList.add('active');
+                    else btn.classList.remove('active');
+                });
+            };
+            
+            updateSeg('seg-order', ssSettings.order); updateSeg('seg-exit', ssSettings.exitMode);
+            updateSeg('seg-bg', ssSettings.bg); updateSeg('seg-model', ssSettings.model);
+            updateSeg('seg-stereo', ssSettings.stereo); updateSeg('seg-depth', ssSettings.depth); 
+            updateSeg('seg-gloss', ssSettings.gloss);
+            
+            document.getElementById('ss-overlay').style.display = 'block';
+            document.getElementById('ss-modal').style.display = 'flex';
+        }
+
+        function closeSSModal() {
+            document.getElementById('ss-overlay').style.display = 'none';
+            document.getElementById('ss-modal').style.display = 'none';
+        }
+        document.getElementById('ss-close').addEventListener('click', closeSSModal);
+        
+        function saveSSSettings() { localStorage.setItem('ss_settings', JSON.stringify(ssSettings)); }
+
+        document.getElementById('ss-compounds').addEventListener('change', (e) => { ssSettings.compounds = e.target.value; saveSSSettings(); });
+        document.getElementById('ss-interval').addEventListener('change', (e) => { ssSettings.interval = parseInt(e.target.value) || 15; saveSSSettings(); });
+        document.getElementById('ss-speed').addEventListener('change', (e) => { ssSettings.speed = parseFloat(e.target.value) || 18; saveSSSettings(); });
+        
+        document.querySelectorAll('.ss-segment').forEach(seg => {
+            seg.addEventListener('click', (e) => {
+                const btn = e.target.closest('.icon-btn');
+                if (!btn) return;
+                seg.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                ssSettings[seg.dataset.key] = btn.dataset.val;
+                saveSSSettings();
+            });
+        });
+
+        // Key bindings
+        document.addEventListener('keydown', (e) => {
+            if (ssActive) {
+                if (ssSettings.exitMode === 'strict') {
+                    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'p') stopScreenSaver();
+                } else {
+                    stopScreenSaver();
+                }
+                return;
+            }
+            if (document.activeElement === searchInput) return;
+            switch (e.key.toLowerCase()) {
+                case 's': btnStereo.click(); break;
+                case 'd': btnDepth.click(); break;
+                case 'm': btnModel.click(); break;
+                case 'b': btnBg.click(); break;
+                case 'g': btnGloss.click(); break;
+                case 'r': btnAutoRotate.click(); break;
+            }
+        });
+
+        if (searchInput.value.length > 0) searchClear.style.display = 'inline-flex';
+
+        // ==========================================
+        // アプリケーション初期化実行
+        // ==========================================
+        updateStereoMode();
+        updateModelMode();
+        updateBgMode(currentBgMode);
+        fetchMoleculeData('L-cysteine');
+        animate();
+    </script>
+</body>
+</html>
