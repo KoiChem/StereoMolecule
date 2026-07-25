@@ -251,29 +251,6 @@
             display: flex; gap: 4px; background: rgba(255,255,255,0.05);
             padding: 4px; border-radius: 20px; border: 1px solid var(--border-light);
         }
-        .ss-bg-option {
-            width: 30px;
-            height: 30px;
-            padding: 0;
-            border-radius: 10px;
-            border: 1px solid rgba(255,255,255,0.18);
-            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
-        }
-        .ss-bg-option:hover { filter: brightness(1.06); }
-        .ss-bg-option.active {
-            outline: 2px solid var(--text-active);
-            outline-offset: 2px;
-            background: inherit;
-            color: #19200d;
-        }
-        .ss-bg-option[data-val="random"] {
-            background: linear-gradient(135deg, #eaf4ff 0 33%, #dadada 33% 66%, #ffffff 66%);
-            color: #3d4650;
-        }
-        .ss-bg-option[data-val="blue"] { background: #eaf4ff; color: #38546b; }
-        .ss-bg-option[data-val="gray"] { background: #dadada; color: #4a4a4a; }
-        .ss-bg-option[data-val="white"] { background: #ffffff; color: #4a4a4a; }
-
         #compound-pick-overlay {
             display: none;
             position: absolute; top: 0; left: 0; width: 100vw; height: 100dvh;
@@ -619,10 +596,10 @@
             <div class="ss-row">
                 <label>背景</label>
                 <div class="ss-segment" data-key="bg" id="seg-bg">
-                    <button class="icon-btn ss-bg-option" data-val="random" title="ランダム" aria-label="背景: ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-                    <button class="icon-btn ss-bg-option" data-val="blue" title="Blue" aria-label="背景: 青"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
-                    <button class="icon-btn ss-bg-option" data-val="gray" title="Gray" aria-label="背景: 灰"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
-                    <button class="icon-btn ss-bg-option" data-val="white" title="White" aria-label="背景: 白"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+                    <button class="icon-btn" data-val="random" title="ランダム" aria-label="背景: ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    <button class="icon-btn" data-val="blue" title="Blue" aria-label="背景: 青"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#eaf4ff" stroke="currentColor" stroke-width="1.5"/></svg></button>
+                    <button class="icon-btn" data-val="gray" title="Gray" aria-label="背景: 灰"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#dadada" stroke="currentColor" stroke-width="1.5"/></svg></button>
+                    <button class="icon-btn" data-val="white" title="White" aria-label="背景: 白"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#ffffff" stroke="#cccccc" stroke-width="1.5"/></svg></button>
                 </div>
             </div>
 
@@ -1214,7 +1191,7 @@
         function getCurrentEyeAspect() {
             const isMobileLandscape = window.matchMedia("(max-width: 1366px) and (orientation: landscape), (pointer: coarse) and (orientation: landscape)").matches;
             const controlPanel = document.getElementById('control-panel');
-            const panelWidth = (isMobileLandscape && controlPanel) ? controlPanel.getBoundingClientRect().width : 0;
+            const panelWidth = (isMobileLandscape && !ssActive && controlPanel) ? controlPanel.getBoundingClientRect().width : 0;
             const renderWidth = window.innerWidth - panelWidth;
             const height = window.innerHeight;
 
@@ -1223,6 +1200,26 @@
             } else {
                 return (renderWidth / 2) / height;
             }
+        }
+
+        function getFittedCameraDistance(radius) {
+            const vFovRad = (mainCamera.fov / 2) * THREE.MathUtils.DEG2RAD;
+            const labelReserve = (ssActive && ssSettings.nameDisplay !== 'off')
+                ? Math.max(radius * 0.256, 0.4) + 0.65
+                : 0;
+            const distV = (radius + labelReserve) / Math.sin(vFovRad);
+            const hFovRad = Math.atan(Math.tan(vFovRad) * getCurrentEyeAspect());
+            const distH = radius / Math.sin(hFovRad);
+            return Math.max(Math.max(distV, distH) * 1.3, 10);
+        }
+
+        function fitScreenSaverToViewport() {
+            if (!ssActive || !window.currentSdfData || !currentMoleculeRadius) return;
+            offsetX = 0;
+            offsetY = 0;
+            const direction = new THREE.Vector3().subVectors(mainCamera.position, controls.target).normalize();
+            mainCamera.position.copy(controls.target).add(direction.multiplyScalar(getFittedCameraDistance(currentMoleculeRadius)));
+            updateNameSpritePlacement();
         }
 
         function buildMoleculeGeometry(data, keepOffset = false) {
@@ -1398,21 +1395,8 @@
                 moleculeGroup.rotation.set(0, 0, 0);
                 controls.target.set(0, 0, 0);
                 
-                const vFovRad = (mainCamera.fov / 2) * THREE.MathUtils.DEG2RAD;
-                const labelReserve = (ssActive && ssSettings.nameDisplay !== 'off')
-                    ? Math.max(maxDistance * 0.256, 0.4) + 0.65
-                    : 0;
-                const distV = (maxDistance + labelReserve) / Math.sin(vFovRad);
-
-                const eyeAspect = getCurrentEyeAspect();
-                const hFovRad = Math.atan(Math.tan(vFovRad) * eyeAspect);
-                const distH = maxDistance / Math.sin(hFovRad);
-
-                let targetDistance = Math.max(distV, distH) * 1.3;
-                targetDistance = Math.max(targetDistance, 10); 
-                
                 const dir = new THREE.Vector3().subVectors(mainCamera.position, controls.target).normalize();
-                mainCamera.position.copy(controls.target).add(dir.multiplyScalar(targetDistance));
+                mainCamera.position.copy(controls.target).add(dir.multiplyScalar(getFittedCameraDistance(maxDistance)));
             }
         }
 
@@ -1576,7 +1560,7 @@
             let panelWidth = 0;
             const isMobileLandscape = window.matchMedia("(max-width: 1366px) and (orientation: landscape), (pointer: coarse) and (orientation: landscape)").matches;
 
-            if (isMobileLandscape) {
+            if (isMobileLandscape && !ssActive) {
                 panelWidth = controlPanelElement.getBoundingClientRect().width;
                 const searchLeftPos = panelWidth + (window.innerWidth - panelWidth) / 2;
                 searchPanelElement.style.left = `${searchLeftPos}px`;
@@ -1638,6 +1622,7 @@
         // ==========================================
         function resizeCanvas() {
             if (renderer) renderer.setSize(window.innerWidth, window.innerHeight);
+            fitScreenSaverToViewport();
         }
         window.addEventListener('resize', resizeCanvas);
 
@@ -2197,8 +2182,7 @@
                 }
                 if (ssActive && seg.dataset.key === 'nameShake' && nameSprite) {
                     if (ssSettings.nameShake === 'false') {
-                        nameSprite.position.y = nameSpriteBaseY;
-                        nameSprite.position.x = 0;
+                        nameSprite.position.copy(nameSpriteBasePosition);
                     }
                 }
             });
