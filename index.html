@@ -221,6 +221,9 @@
             color: var(--text-active-lvl2);
             background: rgba(255, 222, 154, 0.15);
         }
+        .icon-btn.reverse svg {
+            transform: scaleX(-1);
+        }
 
         /* モーダル用CSS */
         #ss-overlay {
@@ -248,6 +251,28 @@
             display: flex; gap: 4px; background: rgba(255,255,255,0.05);
             padding: 4px; border-radius: 20px; border: 1px solid var(--border-light);
         }
+        .ss-bg-option {
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.18);
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+        }
+        .ss-bg-option:hover { filter: brightness(1.06); }
+        .ss-bg-option.active {
+            outline: 2px solid var(--text-active);
+            outline-offset: 2px;
+            background: inherit;
+            color: #19200d;
+        }
+        .ss-bg-option[data-val="random"] {
+            background: linear-gradient(135deg, #eaf4ff 0 33%, #dadada 33% 66%, #ffffff 66%);
+            color: #3d4650;
+        }
+        .ss-bg-option[data-val="blue"] { background: #eaf4ff; color: #38546b; }
+        .ss-bg-option[data-val="gray"] { background: #dadada; color: #4a4a4a; }
+        .ss-bg-option[data-val="white"] { background: #ffffff; color: #4a4a4a; }
 
         #compound-pick-overlay {
             display: none;
@@ -584,20 +609,20 @@
             </div>
             
             <div class="ss-row">
-                <label>解除モード <span style="font-size:10px; color:rgba(255,255,255,0.4); margin-left:4px;">(通常 or Escのみ)</span></label>
+                <label>解除モード <span style="font-size:10px; color:rgba(255,255,255,0.4); margin-left:4px;">(通常 or Esc/ダブルタップ)</span></label>
                 <div class="ss-segment" data-key="exitMode" id="seg-exit">
                     <button class="icon-btn" data-val="normal" title="通常 (Tap)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg></button>
-                    <button class="icon-btn" data-val="strict" title="厳格 (W-Tap / Esc)"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+                    <button class="icon-btn" data-val="strict" title="Esc またはダブルタップで解除"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
                 </div>
             </div>
 
             <div class="ss-row">
                 <label>背景</label>
                 <div class="ss-segment" data-key="bg" id="seg-bg">
-                    <button class="icon-btn" data-val="random" title="ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-                    <button class="icon-btn" data-val="blue" title="Blue"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#eaf4ff" stroke="currentColor" stroke-width="1.5"/></svg></button>
-                    <button class="icon-btn" data-val="gray" title="Gray"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#dadada" stroke="currentColor" stroke-width="1.5"/></svg></button>
-                    <button class="icon-btn" data-val="white" title="White"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="#ffffff" stroke="#cccccc" stroke-width="1.5"/></svg></button>
+                    <button class="icon-btn ss-bg-option" data-val="random" title="ランダム" aria-label="背景: ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    <button class="icon-btn ss-bg-option" data-val="blue" title="Blue" aria-label="背景: 青"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+                    <button class="icon-btn ss-bg-option" data-val="gray" title="Gray" aria-label="背景: 灰"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+                    <button class="icon-btn ss-bg-option" data-val="white" title="White" aria-label="背景: 白"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
                 </div>
             </div>
 
@@ -607,7 +632,7 @@
                     <button class="icon-btn" data-val="random" title="ランダム"><svg viewBox="0 0 24 24"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
                     <button class="icon-btn" data-val="ballstick" title="Ball&Stick"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8.12" y1="8.12" x2="15.88" y2="15.88" stroke="currentColor" stroke-width="1.5"/></svg></button>
                     <button class="icon-btn" data-val="spacefilling" title="SpaceFilling"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><circle cx="15" cy="15" r="5"/></svg></button>
-                    <button class="icon-btn" data-val="ghost" title="Ghost Mode"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="15" cy="15" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2" fill="currentColor"/><circle cx="15" cy="15" r="1.5" fill="currentColor"/></svg></button>
+                    <button class="icon-btn" data-val="ghost" title="Hybrid"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="15" cy="15" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2" fill="currentColor"/><circle cx="15" cy="15" r="1.5" fill="currentColor"/></svg></button>
                 </div>
             </div>
 
@@ -691,7 +716,7 @@
         const MODEL_TITLES = { 
             'ballstick': 'Model: Ball and Stick [m]', 
             'spacefilling': 'Model: Space Filling [m]',
-            'ghost': 'Model: Ghost Mode [m]'
+            'ghost': 'Model: Hybrid [m]'
         };
 
         const SVG_BALLSTICK = `<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8.12" y1="8.12" x2="15.88" y2="15.88"/></svg>`;
@@ -709,6 +734,7 @@
         let currentRotateIndex = 0;
         let isAutoRotating = false;
         let currentRotateSpeed = 0;
+        let rotateDirection = 1;
 
         let wakeLock = null;
         let moleculeSceneObjects = [];
@@ -827,6 +853,7 @@
             
             const ssOverlay = document.getElementById('ss-exit-overlay');
             ssOverlay.style.display = 'block';
+            ssOverlay.style.pointerEvents = ssSettings.exitMode === 'strict' ? 'none' : 'auto';
             ssOverlay.dataset.exiting = "false";
             ssPointersDown = 0;
             ssClickCount = 0;
@@ -852,6 +879,7 @@
                 depth: currentDepthIndex,
                 gloss: currentGlossMode,
                 rotateIndex: currentRotateIndex,
+                rotateDirection: rotateDirection,
                 sdfData: window.currentSdfData,
                 labelText: document.getElementById('label-left').textContent,
                 cameraPosition: mainCamera.position.clone(),
@@ -862,6 +890,11 @@
             
             isAutoRotating = true;
             currentRotateSpeed = ssSettings.speed;
+            offsetX = 0;
+            offsetY = 0;
+            moleculeGroup.rotation.set(0, 0, 0);
+            controls.target.set(0, 0, 0);
+            mainCamera.position.set(0, 0, 15);
             initSSRotateState();
             updateWakeLock();
 
@@ -928,6 +961,7 @@
             currentDepthIndex = previousState.depth;
             currentGlossMode = previousState.gloss;
             currentRotateIndex = previousState.rotateIndex;
+            rotateDirection = previousState.rotateDirection;
             
             if (currentRotateIndex === 0) {
                 isAutoRotating = false;
@@ -946,10 +980,7 @@
             if(currentGlossMode) btnGloss.classList.add('active');
             else btnGloss.classList.remove('active');
             
-            const btnAutoRotate = document.getElementById('btn-autorotate');
-            btnAutoRotate.classList.remove('active', 'level-2');
-            if (currentRotateIndex === 1) btnAutoRotate.classList.add('active');
-            if (currentRotateIndex === 2) btnAutoRotate.classList.add('active', 'level-2');
+            updateAutoRotateButton();
             
             if (window.currentSdfData) buildMoleculeGeometry(window.currentSdfData, true);
 
@@ -977,7 +1008,7 @@
         // ==========================================
         let currentMoleculeRadius = 2;
         let nameSprite = null;
-        let nameSpriteBaseY = 0;
+        const nameSpriteBasePosition = new THREE.Vector3();
         let nameOpacityState = { current: 0, target: 0 };
         let nameClockTime = 0;
         let nameFontsReady = false;
@@ -1047,6 +1078,22 @@
             nameOpacityState.target = 0;
         }
 
+        function updateNameSpritePlacement() {
+            if (!nameSprite) return;
+
+            const worldHeight = nameSprite.userData.worldHeight;
+            const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
+            const cameraDistance = mainCamera.position.distanceTo(controls.target);
+            const halfVisibleHeight = Math.tan(THREE.MathUtils.degToRad(mainCamera.fov / 2)) * cameraDistance;
+            const desiredOffset = currentMoleculeRadius + worldHeight / 2 + 0.45;
+            const safeOffset = Math.max(0, halfVisibleHeight - worldHeight / 2 - 0.2);
+            const verticalOffset = Math.min(desiredOffset, safeOffset);
+
+            nameSpriteBasePosition.copy(controls.target).addScaledVector(cameraUp, -verticalOffset);
+            nameSprite.position.copy(nameSpriteBasePosition);
+            nameSprite.quaternion.copy(mainCamera.quaternion);
+        }
+
         async function updateNameSprite(text) {
             removeNameSprite();
             if (ssSettings.nameDisplay === 'off') return;
@@ -1069,17 +1116,8 @@
             const geometry = new THREE.PlaneGeometry(worldWidth, worldHeight);
             nameSprite = new THREE.Mesh(geometry, material);
 
-            // 分子の下に置きつつ、カメラ可視範囲の下端より上に収める（スマホのはみ出し対策）
-            // 奥行きは重心（原点）と同じ面になるよう Z=0 のまま、左右眼共通の向きは mainCamera に合わせる
-            const desiredY = -(currentMoleculeRadius * 1.25 + 0.6);
-            const camDist = mainCamera.position.distanceTo(controls.target);
-            const halfVisibleH = Math.tan(THREE.MathUtils.degToRad(mainCamera.fov / 2)) * camDist;
-            const margin = worldHeight * 0.6;
-            const shakePad = currentMoleculeRadius * 0.05;
-            const minY = -halfVisibleH + margin + shakePad;
-            nameSpriteBaseY = Math.max(desiredY, minY);
-            nameSprite.position.set(0, nameSpriteBaseY, 0);
-            nameSprite.quaternion.copy(mainCamera.quaternion);
+            nameSprite.userData.worldHeight = worldHeight;
+            updateNameSpritePlacement();
 
             scene.add(nameSprite);
 
@@ -1361,7 +1399,10 @@
                 controls.target.set(0, 0, 0);
                 
                 const vFovRad = (mainCamera.fov / 2) * THREE.MathUtils.DEG2RAD;
-                const distV = maxDistance / Math.sin(vFovRad);
+                const labelReserve = (ssActive && ssSettings.nameDisplay !== 'off')
+                    ? Math.max(maxDistance * 0.256, 0.4) + 0.65
+                    : 0;
+                const distV = (maxDistance + labelReserve) / Math.sin(vFovRad);
 
                 const eyeAspect = getCurrentEyeAspect();
                 const hFovRad = Math.atan(Math.tan(vFovRad) * eyeAspect);
@@ -1500,15 +1541,13 @@
                     moleculeGroup.rotateOnWorldAxis(ssFinalAxis, angle);
                 } else {
                     const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
-                    moleculeGroup.rotateOnWorldAxis(cameraUp, angle);
+                    moleculeGroup.rotateOnWorldAxis(cameraUp, angle * rotateDirection);
                 }
             }
 
             if (nameSprite) {
                 nameClockTime += delta;
-
-                // 左右眼で共通の向き（立体視の奥行きを重心面に安定させる）
-                nameSprite.quaternion.copy(mainCamera.quaternion);
+                updateNameSpritePlacement();
 
                 if (ssSettings.nameShake !== 'false') {
                     const speed = 1.2;
@@ -1520,13 +1559,11 @@
                     const bobX = Math.sin(nameClockTime * speed * 1.098) * amplitudeX
                                + Math.cos(nameClockTime * speed * 1.95) * (amplitudeX * 0.4);
 
-                    nameSprite.position.y = nameSpriteBaseY + bobY;
-                    nameSprite.position.x = bobX;
-                    nameSprite.position.z = 0;
+                    const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
+                    const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(mainCamera.quaternion).normalize();
+                    nameSprite.position.addScaledVector(cameraUp, bobY).addScaledVector(cameraRight, bobX);
                 } else {
-                    nameSprite.position.y = nameSpriteBaseY;
-                    nameSprite.position.x = 0;
-                    nameSprite.position.z = 0;
+                    nameSprite.position.copy(nameSpriteBasePosition);
                 }
 
                 nameOpacityState.current += (nameOpacityState.target - nameOpacityState.current) * 0.04;
@@ -1644,6 +1681,75 @@
                 }
             }
         });
+
+        let canvasTapStart = null;
+        let canvasTapTimer = null;
+        let canvasLastTapTime = 0;
+        const TAP_MAX_DURATION = 350;
+        const TAP_MAX_MOVEMENT = 12;
+        const DOUBLE_TAP_DELAY = 280;
+
+        function cycleModelMode() {
+            if (currentRenderMode === 'ballstick') currentRenderMode = 'spacefilling';
+            else if (currentRenderMode === 'spacefilling') currentRenderMode = 'ghost';
+            else currentRenderMode = 'ballstick';
+            updateModelMode();
+            if (window.currentSdfData) buildMoleculeGeometry(window.currentSdfData, true);
+        }
+
+        function reverseAutoRotation() {
+            if (!isAutoRotating || ssActive) return false;
+            rotateDirection *= -1;
+            updateAutoRotateButton();
+            return true;
+        }
+
+        function handleCanvasTap() {
+            const now = performance.now();
+
+            if (ssActive && ssSettings.exitMode === 'strict') {
+                if (now - canvasLastTapTime <= DOUBLE_TAP_DELAY) {
+                    clearTimeout(canvasTapTimer);
+                    canvasTapTimer = null;
+                    canvasLastTapTime = 0;
+                    stopScreenSaver();
+                } else {
+                    canvasLastTapTime = now;
+                    clearTimeout(canvasTapTimer);
+                    canvasTapTimer = setTimeout(() => { canvasLastTapTime = 0; }, DOUBLE_TAP_DELAY);
+                }
+                return;
+            }
+            if (ssActive) return;
+
+            if (now - canvasLastTapTime <= DOUBLE_TAP_DELAY) {
+                clearTimeout(canvasTapTimer);
+                canvasTapTimer = null;
+                canvasLastTapTime = 0;
+                cycleModelMode();
+            } else {
+                canvasLastTapTime = now;
+                clearTimeout(canvasTapTimer);
+                canvasTapTimer = setTimeout(() => {
+                    canvasLastTapTime = 0;
+                    reverseAutoRotation();
+                }, DOUBLE_TAP_DELAY);
+            }
+        }
+
+        renderer.domElement.addEventListener('pointerdown', (e) => {
+            if (e.isPrimary && (e.pointerType !== 'mouse' || e.button === 0)) {
+                canvasTapStart = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, time: performance.now() };
+            }
+        });
+        renderer.domElement.addEventListener('pointerup', (e) => {
+            if (!canvasTapStart || canvasTapStart.pointerId !== e.pointerId) return;
+            const movement = Math.hypot(e.clientX - canvasTapStart.x, e.clientY - canvasTapStart.y);
+            const duration = performance.now() - canvasTapStart.time;
+            canvasTapStart = null;
+            if (movement <= TAP_MAX_MOVEMENT && duration <= TAP_MAX_DURATION) handleCanvasTap();
+        });
+        renderer.domElement.addEventListener('pointercancel', () => { canvasTapStart = null; });
 
         window.addEventListener('pointermove', (e) => {
             if (e.pointerType === 'mouse' && isRightDragging) {
@@ -1930,13 +2036,7 @@
                 btnModel.classList.add('active');
             }
         }
-        btnModel.addEventListener('click', () => {
-            if (currentRenderMode === 'ballstick') currentRenderMode = 'spacefilling';
-            else if (currentRenderMode === 'spacefilling') currentRenderMode = 'ghost';
-            else currentRenderMode = 'ballstick';
-            updateModelMode();
-            if (window.currentSdfData) buildMoleculeGeometry(window.currentSdfData, true); 
-        });
+        btnModel.addEventListener('click', cycleModelMode);
 
         const btnBg = document.getElementById('btn-bg');
         const bgIconRect = document.getElementById('bg-icon-rect');
@@ -1970,6 +2070,14 @@
         });
 
         const btnAutoRotate = document.getElementById('btn-autorotate');
+        function updateAutoRotateButton() {
+            btnAutoRotate.classList.remove('active', 'level-2', 'reverse');
+            if (currentRotateIndex === 1) btnAutoRotate.classList.add('active');
+            if (currentRotateIndex === 2) btnAutoRotate.classList.add('active', 'level-2');
+            if (isAutoRotating && rotateDirection < 0) btnAutoRotate.classList.add('reverse');
+            const directionLabel = rotateDirection < 0 ? 'Reverse' : 'Forward';
+            btnAutoRotate.title = `${ROTATE_TITLES[currentRotateIndex]} (${directionLabel})`;
+        }
         async function updateWakeLock() {
             if ('wakeLock' in navigator) {
                 if (isAutoRotating && !wakeLock) {
@@ -1984,18 +2092,34 @@
                 navigator.wakeLock.request('screen').then(wl => wakeLock = wl).catch(() => {});
             }
         });
-        btnAutoRotate.addEventListener('click', () => {
+        let rotatePressTimer = null;
+        let rotateLongPressHandled = false;
+        btnAutoRotate.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            rotateLongPressHandled = false;
+            clearTimeout(rotatePressTimer);
+            rotatePressTimer = setTimeout(() => {
+                rotateLongPressHandled = reverseAutoRotation();
+            }, 450);
+        });
+        const clearRotateLongPress = () => { clearTimeout(rotatePressTimer); };
+        btnAutoRotate.addEventListener('pointerup', clearRotateLongPress);
+        btnAutoRotate.addEventListener('pointercancel', clearRotateLongPress);
+        btnAutoRotate.addEventListener('contextmenu', (e) => e.preventDefault());
+        btnAutoRotate.addEventListener('click', (e) => {
+            if (rotateLongPressHandled) {
+                e.preventDefault();
+                rotateLongPressHandled = false;
+                return;
+            }
             currentRotateIndex = (currentRotateIndex + 1) % 3;
-            btnAutoRotate.title = ROTATE_TITLES[currentRotateIndex];
-            btnAutoRotate.classList.remove('active', 'level-2');
             
             if (currentRotateIndex === 0) {
                 isAutoRotating = false; currentRotateSpeed = 0;
             } else {
                 isAutoRotating = true; currentRotateSpeed = ROTATE_SPEEDS[currentRotateIndex];
-                if (currentRotateIndex === 1) btnAutoRotate.classList.add('active'); 
-                if (currentRotateIndex === 2) btnAutoRotate.classList.add('active', 'level-2'); 
             }
+            updateAutoRotateButton();
             updateWakeLock();
         });
 
@@ -2161,6 +2285,7 @@
         updateDepthMode();
         updateModelMode();
         updateBgMode(currentBgMode);
+        updateAutoRotateButton();
         fetchMoleculeData('L-cysteine');
         animate();
     </script>
