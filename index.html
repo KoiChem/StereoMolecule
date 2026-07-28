@@ -876,6 +876,11 @@
         const COMPOUND_CIDS = {
             'fullerene-c36': '101760755'
         };
+        const COMPOUND_DISPLAY_NAMES = {
+            '101760755': 'Fullerene-C36'
+        };
+        // 縦画面でもスクリーンセーバーの名前ラベルが収まる上限。
+        const MAX_COMPOUND_TITLE_LENGTH = 18;
         const normalizeCompoundList = (value) => String(value || '')
             .split(/,|\n/)
             .map(name => name.trim().toLocaleLowerCase())
@@ -904,6 +909,7 @@
         if (typeof ssSettings.nameDisplay === 'undefined') ssSettings.nameDisplay = "sans"; // ★デフォルト文字をサンセリフに
         if (typeof ssSettings.nameShake === 'undefined') ssSettings.nameShake = "true";
         let currentDisplayedMoleculeName = 'L-cysteine';
+        let moleculeFetchRequestId = 0;
         
         let ssActive = false;
         let ssTimer = null;
@@ -1354,6 +1360,25 @@
             return Math.max(Math.max(distV, distH) * 1.3, 10);
         }
 
+        function getCompoundCid(query) {
+            const directCid = query.match(/^(?:cid\s*:\s*)?(\d+)$/i);
+            return directCid ? directCid[1] : COMPOUND_CIDS[query.toLocaleLowerCase()];
+        }
+
+        async function fetchCompoundTitle(cid, signal) {
+            const titleUrl = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${cid}/property/Title/JSON`;
+            const response = await fetch(titleUrl, signal ? { signal } : undefined);
+            if (!response.ok) return null;
+            const titleData = await response.json();
+            return titleData?.PropertyTable?.Properties?.[0]?.Title || null;
+        }
+
+        function getCompoundDisplayName(cid, title, fallbackName) {
+            if (COMPOUND_DISPLAY_NAMES[cid]) return COMPOUND_DISPLAY_NAMES[cid];
+            if (title && Array.from(title).length <= MAX_COMPOUND_TITLE_LENGTH) return title;
+            return `CID:${cid || fallbackName}`;
+        }
+
         function fitScreenSaverToViewport() {
             if (!ssActive || !window.currentSdfData || !currentMoleculeRadius) return;
             offsetX = 0;
@@ -1545,16 +1570,18 @@
             let cleanQuery = query.trim();
             const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(cleanQuery);
             const signal = isSS ? ssFetchAbort?.signal : undefined;
-            const isStaleSS = () => isSS && (!ssActive || (signal && signal.aborted));
+            const requestId = isSS ? null : ++moleculeFetchRequestId;
+            const isStaleRequest = () => (isSS && (!ssActive || (signal && signal.aborted)))
+                || (!isSS && requestId !== moleculeFetchRequestId);
             
             if (hasJapanese) {
                 try {
                     const wikiUrl = `https://ja.wikipedia.org/w/api.php?action=query&prop=langlinks&lllang=en&format=json&origin=*&redirects=1&titles=${encodeURIComponent(cleanQuery)}`;
                     const wikiRes = await fetch(wikiUrl, signal ? { signal } : undefined);
-                    if (isStaleSS()) return;
+                    if (isStaleRequest()) return;
                     if (wikiRes.ok) {
                         const wikiData = await wikiRes.json();
-                        if (isStaleSS()) return;
+                        if (isStaleRequest()) return;
                         const pages = wikiData.query.pages;
                         for (const id in pages) {
                             if (pages[id].langlinks && pages[id].langlinks.length > 0) {
@@ -1569,21 +1596,24 @@
                 }
             }
 
-            if (isStaleSS()) return;
+            if (isStaleRequest()) return;
 
-            const compoundCid = COMPOUND_CIDS[cleanQuery.toLocaleLowerCase()];
+            const compoundCid = getCompoundCid(cleanQuery);
             const cleanQueryEncoded = encodeURIComponent(cleanQuery);
             const url = compoundCid
                 ? `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${compoundCid}/SDF?record_type=3d`
                 : `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${cleanQueryEncoded}/SDF?record_type=3d`;
+            const titlePromise = compoundCid && !COMPOUND_DISPLAY_NAMES[compoundCid]
+                ? fetchCompoundTitle(compoundCid, signal).catch(() => null)
+                : Promise.resolve(null);
             
             try {
                 const response = await fetch(url, signal ? { signal } : undefined);
-                if (isStaleSS()) return;
+                if (isStaleRequest()) return;
                 if (!response.ok) throw new Error("指定された化合物・示性式が見つかりません。");
                 
                 const sdfText = await response.text();
-                if (isStaleSS()) return;
+                if (isStaleRequest()) return;
 
                 const parsedData = parseSDF(sdfText);
                 if (isSS) applySSPendingFx();
@@ -1591,7 +1621,11 @@
                 window.currentSdfData = parsedData;
                 if (!isSS) currentDisplayedMoleculeName = cleanQuery;
 
-                let labelText = cleanQuery;
+                const compoundTitle = await titlePromise;
+                if (isStaleRequest()) return;
+                let labelText = compoundCid
+                    ? getCompoundDisplayName(compoundCid, compoundTitle, cleanQuery)
+                    : cleanQuery;
                 if (parsedData.formula) labelText += ` (${parsedData.formula})`;
                 document.getElementById('label-left').textContent = labelText;
                 
@@ -1604,6 +1638,7 @@
 
             } catch (error) {
                 if (error.name === 'AbortError') return;
+                if (isStaleRequest()) return;
                 if (isSS) {
                     if (!ssActive) return;
                     ssPendingFx = null;
