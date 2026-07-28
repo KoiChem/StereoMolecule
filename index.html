@@ -1719,6 +1719,16 @@
             return true;
         }
 
+        function startSlowAutoRotation() {
+            if (ssActive || isAutoRotating) return false;
+            currentRotateIndex = 1;
+            currentRotateSpeed = ROTATE_SPEEDS[currentRotateIndex];
+            isAutoRotating = true;
+            updateAutoRotateButton();
+            updateWakeLock();
+            return true;
+        }
+
         function handleCanvasTap() {
             const now = performance.now();
 
@@ -1747,7 +1757,7 @@
                 clearTimeout(canvasTapTimer);
                 canvasTapTimer = setTimeout(() => {
                     canvasLastTapTime = 0;
-                    reverseAutoRotation();
+                    if (!reverseAutoRotation()) startSlowAutoRotation();
                 }, DOUBLE_TAP_DELAY);
             }
         }
@@ -2230,6 +2240,7 @@
             document.getElementById('ss-modal').style.display = 'none';
         }
         document.getElementById('ss-close').addEventListener('click', closeSSModal);
+        document.getElementById('ss-overlay').addEventListener('click', closeSSModal);
         
         function saveSSSettings() { localStorage.setItem('ss_settings', JSON.stringify(ssSettings)); }
 
