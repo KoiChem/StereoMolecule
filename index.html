@@ -290,6 +290,49 @@
             background: rgba(222, 255, 154, 0.18);
             border-color: rgba(222, 255, 154, 0.35);
         }
+        #compound-pick-list.editing {
+            flex-direction: column;
+            flex-wrap: nowrap;
+            gap: 6px;
+        }
+        .compound-edit-row {
+            display: grid;
+            grid-template-columns: 30px minmax(0, 1fr) 30px;
+            align-items: center;
+            min-height: 42px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-light);
+            border-radius: 12px;
+            color: rgba(255, 255, 255, 0.85);
+            transition: border-color 0.2s ease, background 0.2s ease, opacity 0.2s ease;
+        }
+        .compound-edit-row.dragging {
+            opacity: 0.45;
+            background: rgba(222, 255, 154, 0.12);
+            border-color: rgba(222, 255, 154, 0.45);
+        }
+        .compound-edit-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 12px;
+            padding: 0 4px;
+        }
+        .compound-drag-handle {
+            cursor: grab;
+            touch-action: none;
+        }
+        .compound-drag-handle:active {
+            cursor: grabbing;
+        }
+        .compound-delete-btn:hover:not(:disabled) {
+            color: #ff9a9a;
+            background: rgba(240, 80, 80, 0.12);
+        }
+        .compound-delete-btn:disabled {
+            cursor: default;
+            opacity: 0.35;
+        }
         #compound-pick-actions {
             display: flex;
             justify-content: flex-end;
@@ -332,6 +375,25 @@
             display: none;
             transition: opacity 0.4s ease;
             pointer-events: none;
+        }
+        #toast-notification.has-action {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            pointer-events: auto;
+        }
+        .toast-action-btn {
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.45);
+            border-radius: 10px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 5px 9px;
+        }
+        .toast-action-btn:hover {
+            background: rgba(255,255,255,0.14);
         }
 
         #portrait-warning {
@@ -575,7 +637,10 @@
         <div id="compound-pick-modal" class="ui-panel">
             <div style="width:100%; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-light); padding-bottom:10px;">
                 <span style="font-weight:600; font-size:13px; letter-spacing:1px; color:var(--text-active);">Screensaver Compounds</span>
-                <button id="compound-pick-close" class="icon-btn" style="padding:2px;"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+                <div style="display:flex; align-items:center; gap:4px;">
+                    <button id="compound-pick-edit" class="icon-btn" style="padding:2px;" title="候補分子を編集" aria-label="候補分子を編集"><svg viewBox="0 0 24 24"><path d="M4 20h4L20 8a2.8 2.8 0 0 0-4-4L4 16v4z"/><line x1="13.5" y1="6.5" x2="17.5" y2="10.5"/></svg></button>
+                    <button id="compound-pick-close" class="icon-btn" style="padding:2px;" title="閉じる" aria-label="閉じる"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+                </div>
             </div>
             <div id="compound-pick-list"></div>
             <div id="compound-pick-actions">
@@ -804,8 +869,24 @@
         // ==========================================
         // スクリーンセーバー(自動再生)システム管理
         // ==========================================
+        const LEGACY_DEFAULT_COMPOUNDS = "nanokid, adamantane, caffeine, cholesterol, perfluorohexanesulfonic acid, morphine, strychnine, sucrose, adenosine triphosphate, porphine, penicillin v, perfluorooctane, hexahelicene, mirex, tetrodotoxin, capsaicin, linolenic acid, hexanitrohexaazaisowurtzitane, 1-methylsilatrane, decafluorobiphenyl";
+        const DEFAULT_COMPOUNDS = "nanokid, adamantane, caffeine, cholesterol, perfluorohexanesulfonic acid, morphine, strychnine, sucrose, adenosine triphosphate, porphine, penicillin v, hexahelicene, mirex, tetrodotoxin, capsaicin, 1-methylsilatrane, reserpine, ergotamine, doxorubicin, tetracycline, cryptand-222, astaxanthin, octanitrocubane, dodecahedrane, Fullerene-C20, aconitine";
+        const COMPOUND_DEFAULTS_VERSION = 2;
+        const normalizeCompoundList = (value) => String(value || '')
+            .split(/,|\n/)
+            .map(name => name.trim().toLocaleLowerCase())
+            .filter(Boolean)
+            .join('\n');
+
         let ssSettings = JSON.parse(localStorage.getItem('ss_settings')) || {};
-        if (!ssSettings.compounds) ssSettings.compounds = "nanokid, adamantane, caffeine, cholesterol, perfluorohexanesulfonic acid, morphine, strychnine, sucrose, adenosine triphosphate, porphine, penicillin v, perfluorooctane, hexahelicene, mirex, tetrodotoxin, capsaicin, linolenic acid, hexanitrohexaazaisowurtzitane, 1-methylsilatrane, decafluorobiphenyl";
+        const shouldInstallNewDefaults = !ssSettings.compounds
+            || (!ssSettings.compoundDefaultsVersion
+                && normalizeCompoundList(ssSettings.compounds) === normalizeCompoundList(LEGACY_DEFAULT_COMPOUNDS));
+        if (shouldInstallNewDefaults) ssSettings.compounds = DEFAULT_COMPOUNDS;
+        if (shouldInstallNewDefaults || !ssSettings.compoundDefaultsVersion) {
+            ssSettings.compoundDefaultsVersion = COMPOUND_DEFAULTS_VERSION;
+            localStorage.setItem('ss_settings', JSON.stringify(ssSettings));
+        }
         if (!ssSettings.order) ssSettings.order = "sequential";
         if (typeof ssSettings.interval === 'undefined') ssSettings.interval = 15;
         if (typeof ssSettings.speed === 'undefined') ssSettings.speed = 18;
@@ -1163,10 +1244,35 @@
         let toastTimeout;
         function showNotification(message) {
             const toast = document.getElementById('toast-notification');
+            toast.classList.remove('has-action');
             toast.textContent = message;
             toast.style.display = 'block';
             setTimeout(() => { toast.style.opacity = '1'; }, 10);
             
+            if (toastTimeout) clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => { toast.style.display = 'none'; }, 400);
+            }, 4000);
+        }
+
+        function showUndoNotification(message, onUndo) {
+            const toast = document.getElementById('toast-notification');
+            toast.classList.add('has-action');
+            toast.replaceChildren(document.createTextNode(message));
+            const undoBtn = document.createElement('button');
+            undoBtn.type = 'button';
+            undoBtn.className = 'toast-action-btn';
+            undoBtn.textContent = '元に戻す';
+            undoBtn.addEventListener('click', () => {
+                if (toastTimeout) clearTimeout(toastTimeout);
+                onUndo();
+                showNotification('元に戻しました。');
+            }, { once: true });
+            toast.appendChild(undoBtn);
+            toast.style.display = 'flex';
+            setTimeout(() => { toast.style.opacity = '1'; }, 10);
+
             if (toastTimeout) clearTimeout(toastTimeout);
             toastTimeout = setTimeout(() => {
                 toast.style.opacity = '0';
@@ -1999,19 +2105,140 @@
         });
         btnSearchSubmit.addEventListener('selectstart', (e) => { e.preventDefault(); });
 
-        function openCompoundPickModal() {
+        let compoundPickEditMode = false;
+        let compoundDragState = null;
+
+        function getRegisteredCompounds() {
+            return ssSettings.compounds.split(/,|\n/).map(s => s.trim()).filter(Boolean);
+        }
+
+        function saveRegisteredCompounds(list) {
+            ssSettings.compounds = list.join(', ');
+            saveSSSettings();
+        }
+
+        function updateCompoundPickEditButton() {
+            const editBtn = document.getElementById('compound-pick-edit');
+            const title = compoundPickEditMode ? '編集を完了' : '候補分子を編集';
+            editBtn.title = title;
+            editBtn.setAttribute('aria-label', title);
+            editBtn.classList.toggle('active', compoundPickEditMode);
+            editBtn.innerHTML = compoundPickEditMode
+                ? '<svg viewBox="0 0 24 24"><polyline points="4 12 9 17 20 6"/></svg>'
+                : '<svg viewBox="0 0 24 24"><path d="M4 20h4L20 8a2.8 2.8 0 0 0-4-4L4 16v4z"/><line x1="13.5" y1="6.5" x2="17.5" y2="10.5"/></svg>';
+        }
+
+        function finishCompoundDrag() {
+            if (!compoundDragState) return;
+            const { row, moved } = compoundDragState;
+            row.classList.remove('dragging');
+            if (row.hasPointerCapture?.(compoundDragState.pointerId)) row.releasePointerCapture(compoundDragState.pointerId);
+            if (moved) {
+                const list = Array.from(document.querySelectorAll('#compound-pick-list .compound-edit-row'))
+                    .map(item => item.dataset.compound);
+                saveRegisteredCompounds(list);
+            }
+            compoundDragState = null;
+        }
+
+        function beginCompoundDrag(event, row) {
+            if (!compoundPickEditMode || (event.pointerType === 'mouse' && event.button !== 0)) return;
+            event.preventDefault();
+            row.setPointerCapture(event.pointerId);
+            compoundDragState = {
+                row,
+                pointerId: event.pointerId,
+                startY: event.clientY,
+                moved: false
+            };
+            row.classList.add('dragging');
+        }
+
+        function moveCompoundDrag(event) {
+            if (!compoundDragState || event.pointerId !== compoundDragState.pointerId) return;
+            const { row, startY } = compoundDragState;
+            if (Math.abs(event.clientY - startY) > 4) compoundDragState.moved = true;
+            if (!compoundDragState.moved) return;
+
+            const listEl = document.getElementById('compound-pick-list');
+            const otherRows = Array.from(listEl.querySelectorAll('.compound-edit-row')).filter(item => item !== row);
+            const nextRow = otherRows.find(item => event.clientY < item.getBoundingClientRect().top + item.getBoundingClientRect().height / 2);
+            if (nextRow) listEl.insertBefore(row, nextRow);
+            else listEl.appendChild(row);
+
+            const modal = document.getElementById('compound-pick-modal');
+            const modalRect = modal.getBoundingClientRect();
+            if (event.clientY < modalRect.top + 44) modal.scrollTop -= 10;
+            else if (event.clientY > modalRect.bottom - 44) modal.scrollTop += 10;
+        }
+
+        window.addEventListener('pointermove', moveCompoundDrag);
+        window.addEventListener('pointerup', finishCompoundDrag);
+        window.addEventListener('pointercancel', finishCompoundDrag);
+
+        function removeRegisteredCompound(index) {
+            const list = getRegisteredCompounds();
+            if (list.length <= 1) {
+                showNotification('候補分子は1つ以上必要です。');
+                return;
+            }
+            const [removedName] = list.splice(index, 1);
+            saveRegisteredCompounds(list);
+            renderCompoundPickList();
+            showUndoNotification(`「${removedName}」を削除しました。`, () => {
+                const currentList = getRegisteredCompounds();
+                currentList.splice(Math.min(index, currentList.length), 0, removedName);
+                saveRegisteredCompounds(currentList);
+                if (document.getElementById('compound-pick-modal').style.display === 'flex') renderCompoundPickList();
+            });
+        }
+
+        function renderCompoundPickList() {
             const listEl = document.getElementById('compound-pick-list');
             const registerBtn = document.getElementById('compound-pick-register');
             listEl.innerHTML = '';
-            const list = ssSettings.compounds.split(/,|\n/).map(s => s.trim()).filter(s => s.length > 0);
+            const list = getRegisteredCompounds();
             registerBtn.disabled = !currentDisplayedMoleculeName;
+            listEl.classList.toggle('editing', compoundPickEditMode);
+            updateCompoundPickEditButton();
             if (list.length === 0) {
                 const empty = document.createElement('div');
                 empty.style.cssText = 'font-size:12px; color:rgba(255,255,255,0.5); padding:8px 0;';
                 empty.textContent = '候補分子が設定されていません（SS設定で追加）';
                 listEl.appendChild(empty);
             } else {
-                list.forEach(name => {
+                list.forEach((name, index) => {
+                    if (compoundPickEditMode) {
+                        const row = document.createElement('div');
+                        row.className = 'compound-edit-row';
+                        row.dataset.compound = name;
+
+                        const handle = document.createElement('button');
+                        handle.type = 'button';
+                        handle.className = 'icon-btn compound-drag-handle';
+                        handle.title = 'ドラッグして並べ替え';
+                        handle.setAttribute('aria-label', `${name}をドラッグして並べ替え`);
+                        handle.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="9" cy="7" r="1" fill="currentColor"/><circle cx="15" cy="7" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="17" r="1" fill="currentColor"/><circle cx="15" cy="17" r="1" fill="currentColor"/></svg>';
+                        handle.addEventListener('pointerdown', event => beginCompoundDrag(event, row));
+
+                        const nameEl = document.createElement('span');
+                        nameEl.className = 'compound-edit-name';
+                        nameEl.textContent = name;
+
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.type = 'button';
+                        deleteBtn.className = 'icon-btn compound-delete-btn';
+                        deleteBtn.title = `${name}を削除`;
+                        deleteBtn.setAttribute('aria-label', `${name}を削除`);
+                        deleteBtn.disabled = list.length <= 1;
+                        deleteBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 7h14"/><path d="M9 7V4h6v3"/><path d="M7 7l1 13h8l1-13"/><line x1="10" y1="11" x2="10" y2="16"/><line x1="14" y1="11" x2="14" y2="16"/></svg>';
+                        deleteBtn.addEventListener('click', () => removeRegisteredCompound(index));
+
+                        row.append(handle, nameEl, deleteBtn);
+                        listEl.appendChild(row);
+                        return;
+                    }
+
                     const btn = document.createElement('button');
                     btn.type = 'button';
                     btn.className = 'compound-pick-btn';
@@ -2026,6 +2253,11 @@
                     listEl.appendChild(btn);
                 });
             }
+        }
+
+        function openCompoundPickModal() {
+            compoundPickEditMode = false;
+            renderCompoundPickList();
             document.getElementById('compound-pick-overlay').style.display = 'block';
             document.getElementById('compound-pick-modal').style.display = 'flex';
         }
@@ -2036,6 +2268,11 @@
         }
         document.getElementById('compound-pick-close').addEventListener('click', closeCompoundPickModal);
         document.getElementById('compound-pick-overlay').addEventListener('click', closeCompoundPickModal);
+        document.getElementById('compound-pick-edit').addEventListener('click', () => {
+            finishCompoundDrag();
+            compoundPickEditMode = !compoundPickEditMode;
+            renderCompoundPickList();
+        });
         document.getElementById('compound-pick-register').addEventListener('click', () => {
             const moleculeName = currentDisplayedMoleculeName;
             if (!moleculeName) {
@@ -2043,7 +2280,7 @@
                 return;
             }
 
-            const list = ssSettings.compounds.split(/,|\n/).map(s => s.trim()).filter(s => s.length > 0);
+            const list = getRegisteredCompounds();
             const normalizedName = moleculeName.toLocaleLowerCase();
             if (list.some(name => name.toLocaleLowerCase() === normalizedName)) {
                 showNotification('この分子はすでに登録済みです。');
@@ -2051,9 +2288,8 @@
             }
 
             list.push(moleculeName);
-            ssSettings.compounds = list.join(', ');
-            saveSSSettings();
-            openCompoundPickModal();
+            saveRegisteredCompounds(list);
+            renderCompoundPickList();
             showNotification('表示中の分子を登録しました。');
         });
         
