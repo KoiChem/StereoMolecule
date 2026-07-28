@@ -737,6 +737,7 @@
         let currentGlossMode = false;
         let currentDepthIndex = 0;
         let currentRotateIndex = 0;
+        let preferredRotateIndex = 1;
         let isAutoRotating = false;
         let currentRotateSpeed = 0;
         let rotateDirection = 1;
@@ -1719,14 +1720,23 @@
             return true;
         }
 
-        function startSlowAutoRotation() {
+        function cycleCanvasAutoRotation() {
             if (ssActive || isAutoRotating) return false;
-            currentRotateIndex = 1;
+            currentRotateIndex = preferredRotateIndex;
             currentRotateSpeed = ROTATE_SPEEDS[currentRotateIndex];
+            rotateDirection = 1;
             isAutoRotating = true;
             updateAutoRotateButton();
             updateWakeLock();
             return true;
+        }
+
+        function stopCanvasAutoRotation() {
+            currentRotateIndex = 0;
+            currentRotateSpeed = 0;
+            isAutoRotating = false;
+            updateAutoRotateButton();
+            updateWakeLock();
         }
 
         function handleCanvasTap() {
@@ -1757,7 +1767,9 @@
                 clearTimeout(canvasTapTimer);
                 canvasTapTimer = setTimeout(() => {
                     canvasLastTapTime = 0;
-                    if (!reverseAutoRotation()) startSlowAutoRotation();
+                    if (!isAutoRotating) cycleCanvasAutoRotation();
+                    else if (rotateDirection > 0) reverseAutoRotation();
+                    else stopCanvasAutoRotation();
                 }, DOUBLE_TAP_DELAY);
             }
         }
@@ -2178,6 +2190,7 @@
                 return;
             }
             currentRotateIndex = (currentRotateIndex + 1) % 3;
+            if (currentRotateIndex !== 0) preferredRotateIndex = currentRotateIndex;
             
             if (currentRotateIndex === 0) {
                 isAutoRotating = false; currentRotateSpeed = 0;
