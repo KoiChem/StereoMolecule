@@ -914,6 +914,9 @@
         let ssActive = false;
         let ssTimer = null;
         let ssCurrentIndex = 0;
+        let ssRandomQueue = [];
+        let ssRandomQueueKey = '';
+        let ssLastRandomCompound = null;
         let ssFailCount = 0;
         let ssFetchAbort = null;
         let ssPendingFx = null;
@@ -999,8 +1002,34 @@
 
             if (ssFetchAbort) ssFetchAbort.abort();
             ssFetchAbort = new AbortController();
+            resetSSRandomQueue();
             
             loadNextSSMolecule();
+        }
+
+        function resetSSRandomQueue() {
+            ssRandomQueue = [];
+            ssRandomQueueKey = '';
+            ssLastRandomCompound = null;
+        }
+
+        function nextRandomSSCompound(list) {
+            const listKey = list.join('\u001F');
+            if (ssRandomQueueKey !== listKey || ssRandomQueue.length === 0) {
+                ssRandomQueue = list.slice();
+                ssRandomQueueKey = listKey;
+                for (let i = ssRandomQueue.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [ssRandomQueue[i], ssRandomQueue[j]] = [ssRandomQueue[j], ssRandomQueue[i]];
+                }
+                if (ssRandomQueue.length > 1 && ssRandomQueue[ssRandomQueue.length - 1] === ssLastRandomCompound) {
+                    const swapIndex = Math.floor(Math.random() * (ssRandomQueue.length - 1));
+                    [ssRandomQueue[ssRandomQueue.length - 1], ssRandomQueue[swapIndex]] = [ssRandomQueue[swapIndex], ssRandomQueue[ssRandomQueue.length - 1]];
+                }
+            }
+            const compound = ssRandomQueue.pop();
+            ssLastRandomCompound = compound;
+            return compound;
         }
 
         function pickSSEffects() {
@@ -1240,7 +1269,7 @@
 
             let comp = '';
             if (ssSettings.order === 'random') {
-                comp = list[Math.floor(Math.random() * list.length)];
+                comp = nextRandomSSCompound(list);
             } else {
                 comp = list[ssCurrentIndex % list.length];
                 ssCurrentIndex++;
