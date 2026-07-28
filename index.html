@@ -870,8 +870,12 @@
         // スクリーンセーバー(自動再生)システム管理
         // ==========================================
         const LEGACY_DEFAULT_COMPOUNDS = "nanokid, adamantane, caffeine, cholesterol, perfluorohexanesulfonic acid, morphine, strychnine, sucrose, adenosine triphosphate, porphine, penicillin v, perfluorooctane, hexahelicene, mirex, tetrodotoxin, capsaicin, linolenic acid, hexanitrohexaazaisowurtzitane, 1-methylsilatrane, decafluorobiphenyl";
-        const DEFAULT_COMPOUNDS = "nanokid, adamantane, caffeine, cholesterol, perfluorohexanesulfonic acid, morphine, strychnine, sucrose, adenosine triphosphate, porphine, penicillin v, hexahelicene, mirex, tetrodotoxin, capsaicin, 1-methylsilatrane, reserpine, ergotamine, doxorubicin, tetracycline, cryptand-222, astaxanthin, octanitrocubane, dodecahedrane, Fullerene-C20, aconitine";
-        const COMPOUND_DEFAULTS_VERSION = 2;
+        const PREVIOUS_DEFAULT_COMPOUNDS = "nanokid, adamantane, caffeine, cholesterol, perfluorohexanesulfonic acid, morphine, strychnine, sucrose, adenosine triphosphate, porphine, penicillin v, hexahelicene, mirex, tetrodotoxin, capsaicin, 1-methylsilatrane, reserpine, ergotamine, doxorubicin, tetracycline, cryptand-222, astaxanthin, octanitrocubane, dodecahedrane, Fullerene-C20, aconitine";
+        const DEFAULT_COMPOUNDS = "nanokid, adamantane, caffeine, cholesterol, perfluorohexanesulfonic acid, morphine, strychnine, sucrose, adenosine triphosphate, porphine, penicillin v, hexahelicene, mirex, tetrodotoxin, capsaicin, 1-methylsilatrane, reserpine, ergotamine, doxorubicin, tetracycline, cryptand-222, astaxanthin, octanitrocubane, dodecahedrane, Fullerene-C36, aconitine";
+        const COMPOUND_DEFAULTS_VERSION = 3;
+        const COMPOUND_CIDS = {
+            'fullerene-c36': '101760755'
+        };
         const normalizeCompoundList = (value) => String(value || '')
             .split(/,|\n/)
             .map(name => name.trim().toLocaleLowerCase())
@@ -879,9 +883,10 @@
             .join('\n');
 
         let ssSettings = JSON.parse(localStorage.getItem('ss_settings')) || {};
+        const normalizedRegisteredCompounds = normalizeCompoundList(ssSettings.compounds);
         const shouldInstallNewDefaults = !ssSettings.compounds
-            || (!ssSettings.compoundDefaultsVersion
-                && normalizeCompoundList(ssSettings.compounds) === normalizeCompoundList(LEGACY_DEFAULT_COMPOUNDS));
+            || normalizedRegisteredCompounds === normalizeCompoundList(LEGACY_DEFAULT_COMPOUNDS)
+            || normalizedRegisteredCompounds === normalizeCompoundList(PREVIOUS_DEFAULT_COMPOUNDS);
         if (shouldInstallNewDefaults) ssSettings.compounds = DEFAULT_COMPOUNDS;
         if (shouldInstallNewDefaults || !ssSettings.compoundDefaultsVersion) {
             ssSettings.compoundDefaultsVersion = COMPOUND_DEFAULTS_VERSION;
@@ -1566,8 +1571,11 @@
 
             if (isStaleSS()) return;
 
+            const compoundCid = COMPOUND_CIDS[cleanQuery.toLocaleLowerCase()];
             const cleanQueryEncoded = encodeURIComponent(cleanQuery);
-            const url = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${cleanQueryEncoded}/SDF?record_type=3d`;
+            const url = compoundCid
+                ? `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${compoundCid}/SDF?record_type=3d`
+                : `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${cleanQueryEncoded}/SDF?record_type=3d`;
             
             try {
                 const response = await fetch(url, signal ? { signal } : undefined);
