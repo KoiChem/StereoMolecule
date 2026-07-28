@@ -14,6 +14,7 @@
             --border-light-focus: rgba(255, 255, 255, 0.15);
             --text-active: #deff9a;
             --text-active-lvl2: #ffde9a;
+            --keyboard-inset: 0px;
         }
 
         /* ★スクロール破綻を物理的に防ぐ完全固定スタイル */
@@ -84,7 +85,7 @@
         /* UI基本レイアウト */
         #ui-wrapper {
             position: absolute;
-            bottom: 24px;
+            bottom: calc(24px + var(--keyboard-inset));
             left: 50%;
             transform: translateX(-50%);
             display: flex;
@@ -289,6 +290,30 @@
             background: rgba(222, 255, 154, 0.18);
             border-color: rgba(222, 255, 154, 0.35);
         }
+        #compound-pick-actions {
+            display: flex;
+            justify-content: flex-end;
+            width: 100%;
+        }
+        .compound-register-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-light);
+            border-radius: 10px;
+            color: rgba(255, 255, 255, 0.82);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 8px 14px;
+            transition: all 0.2s ease;
+        }
+        .compound-register-btn:hover:not(:disabled) {
+            color: #fff;
+            background: rgba(222, 255, 154, 0.18);
+            border-color: rgba(222, 255, 154, 0.35);
+        }
+        .compound-register-btn:disabled {
+            cursor: default;
+            opacity: 0.45;
+        }
 
         #toast-notification {
             position: absolute;
@@ -419,7 +444,7 @@
                 border-bottom: none; padding-bottom: 0;
             }
             #search-panel {
-                position: absolute; bottom: 24px; left: 50vw;
+                position: absolute; bottom: calc(24px + var(--keyboard-inset)); left: 50vw;
                 transform: translateX(-50%); display: block;
             }
             #search-container {
@@ -553,6 +578,9 @@
                 <button id="compound-pick-close" class="icon-btn" style="padding:2px;"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
             </div>
             <div id="compound-pick-list"></div>
+            <div id="compound-pick-actions">
+                <button type="button" id="compound-pick-register" class="compound-register-btn">表示分子登録</button>
+            </div>
         </div>
 
         <div id="ss-overlay"></div>
@@ -788,6 +816,7 @@
         if (!ssSettings.gloss) ssSettings.gloss = "random";
         if (typeof ssSettings.nameDisplay === 'undefined') ssSettings.nameDisplay = "sans"; // ★デフォルト文字をサンセリフに
         if (typeof ssSettings.nameShake === 'undefined') ssSettings.nameShake = "true";
+        let currentDisplayedMoleculeName = 'L-cysteine';
         
         let ssActive = false;
         let ssTimer = null;
@@ -1445,6 +1474,7 @@
                 if (isSS) applySSPendingFx();
                 buildMoleculeGeometry(parsedData, false); 
                 window.currentSdfData = parsedData;
+                if (!isSS) currentDisplayedMoleculeName = cleanQuery;
 
                 let labelText = cleanQuery;
                 if (parsedData.formula) labelText += ` (${parsedData.formula})`;
@@ -1862,7 +1892,23 @@
             resizeCanvas();
         }
 
+        function updateSearchKeyboardInset() {
+            const viewport = window.visualViewport;
+            const isSearchFocused = document.activeElement === searchInput;
+            const keyboardInset = (isSearchFocused && viewport)
+                ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+                : 0;
+            document.documentElement.style.setProperty('--keyboard-inset', `${keyboardInset}px`);
+        }
+
+        searchInput.addEventListener('focus', () => {
+            updateSearchKeyboardInset();
+            setTimeout(updateSearchKeyboardInset, 50);
+            setTimeout(updateSearchKeyboardInset, 300);
+        });
+
         searchInput.addEventListener('blur', () => {
+            updateSearchKeyboardInset();
             fixViewportScroll();
             // blur直後はキーボード収納アニメーション中でずれが戻りきらないため遅延リトライ
             setTimeout(fixViewportScroll, 50);
@@ -1875,6 +1921,7 @@
             window.visualViewport.addEventListener('resize', () => {
                 clearTimeout(vvResizeTimer);
                 vvResizeTimer = setTimeout(() => {
+                    updateSearchKeyboardInset();
                     // キーボードが閉じて表示領域がほぼ全画面に戻ったのに、
                     // ページ側のスクロール位置がずれたままなら補正する
                     const isKeyboardClosed = window.visualViewport.height >= window.innerHeight - 1;
@@ -1884,6 +1931,7 @@
                 }, 50);
             });
             window.visualViewport.addEventListener('scroll', () => {
+                updateSearchKeyboardInset();
                 const isKeyboardClosed = window.visualViewport.height >= window.innerHeight - 1;
                 if (isKeyboardClosed && (window.visualViewport.offsetTop > 0 || window.scrollY > 0)) {
                     fixViewportScroll();
@@ -1931,8 +1979,10 @@
 
         function openCompoundPickModal() {
             const listEl = document.getElementById('compound-pick-list');
+            const registerBtn = document.getElementById('compound-pick-register');
             listEl.innerHTML = '';
             const list = ssSettings.compounds.split(/,|\n/).map(s => s.trim()).filter(s => s.length > 0);
+            registerBtn.disabled = !currentDisplayedMoleculeName;
             if (list.length === 0) {
                 const empty = document.createElement('div');
                 empty.style.cssText = 'font-size:12px; color:rgba(255,255,255,0.5); padding:8px 0;';
@@ -1964,6 +2014,26 @@
         }
         document.getElementById('compound-pick-close').addEventListener('click', closeCompoundPickModal);
         document.getElementById('compound-pick-overlay').addEventListener('click', closeCompoundPickModal);
+        document.getElementById('compound-pick-register').addEventListener('click', () => {
+            const moleculeName = currentDisplayedMoleculeName;
+            if (!moleculeName) {
+                showNotification('表示中の分子を登録できません。');
+                return;
+            }
+
+            const list = ssSettings.compounds.split(/,|\n/).map(s => s.trim()).filter(s => s.length > 0);
+            const normalizedName = moleculeName.toLocaleLowerCase();
+            if (list.some(name => name.toLocaleLowerCase() === normalizedName)) {
+                showNotification('この分子はすでに登録済みです。');
+                return;
+            }
+
+            list.push(moleculeName);
+            ssSettings.compounds = list.join(', ');
+            saveSSSettings();
+            openCompoundPickModal();
+            showNotification('表示中の分子を登録しました。');
+        });
         
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
