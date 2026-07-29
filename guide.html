@@ -294,6 +294,13 @@
     font-weight:500;
     color:var(--ink);
   }
+  .compound-formula{
+    margin-left:7px;
+    font-size:12px;
+    font-weight:400;
+    color:var(--ink-soft);
+    white-space:nowrap;
+  }
   .compound-card p{ margin:0; font-size:12.5px; line-height:1.65; color:var(--ink-soft); }
   .state-row{
     display:flex;
@@ -628,11 +635,24 @@
           <div class="chip"><svg viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38"/></svg></div>
           <div class="feature-title"><h3>自動回転</h3><kbd>R</kbd></div>
         </div>
-        <p>手を離しても分子がひとりでに回り続ける。展示・観察向け。分子表示をクリックすると、正回転・逆回転・静止を順に切り替えられる。初期は低速で、回転ボタンで選んだ速度を引き継ぐ。</p>
+        <p>手を離しても分子がひとりでに回り続ける。展示・観察向け。ボタン、または分子表示をクリックすると、正回転・逆回転・静止を順に切り替えられる。</p>
         <div class="state-row">
-          <span class="state on">OFF</span><span class="arrow">→</span>
-          <span class="state">ゆっくり (180°/10秒)</span><span class="arrow">→</span>
-          <span class="state">はやい (180°/6秒)</span>
+          <span class="state on">正回転</span><span class="arrow">→</span>
+          <span class="state">逆回転</span><span class="arrow">→</span>
+          <span class="state">静止</span>
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="feature-top">
+          <div class="chip"><svg viewBox="0 0 24 24"><path d="M4 17a8 8 0 0 1 16 0"/><path d="M7.5 12.5l1.4 1.4M12 10v2M16.5 12.5l-1.4 1.4"/><line x1="12" y1="17" x2="12" y2="8"/></svg></div>
+          <div class="feature-title"><h3>回転速度</h3><kbd>V</kbd></div>
+        </div>
+        <p>自動回転の速さを切り替える。停止中に選ぶと、次に回転を始めたときにもその速度を使う。</p>
+        <div class="state-row">
+          <span class="state">遅め (180°/20秒)</span><span class="arrow">→</span>
+          <span class="state on">標準 (180°/10秒)</span><span class="arrow">→</span>
+          <span class="state on amber">早め (180°/6秒)</span>
         </div>
       </div>
 
@@ -716,32 +736,32 @@
       <p>スクリーンセーバーの候補リストには、形・大きさ・元素の違いを楽しめる分子をあらかじめ登録している。候補は自由に追加、削除、並べ替えできる。</p>
     </div>
     <div class="compound-grid">
-      <article class="compound-card"><h3>Nanokid</h3><p>人の形をした分子模型。分子設計の遊び心を感じられるナノアート。</p></article>
-      <article class="compound-card"><h3>Adamantane</h3><p>ダイヤモンド格子の一部を切り出したような、硬く対称性の高い炭化水素ケージ。</p></article>
-      <article class="compound-card"><h3>Caffeine</h3><p>コーヒーや茶に含まれる、平面性の高い刺激性アルカロイド。</p></article>
-      <article class="compound-card"><h3>Cholesterol</h3><p>細胞膜の性質を調整する、4つの環を持つステロール。</p></article>
-      <article class="compound-card"><h3>Perfluorohexanesulfonic acid</h3><p>炭素鎖の水素がフッ素に置換された、非常に安定な含フッ素界面活性剤。</p></article>
-      <article class="compound-card"><h3>Morphine</h3><p>ケシ由来の複雑な多環式アルカロイド。強い鎮痛作用で知られる。</p></article>
-      <article class="compound-card"><h3>Strychnine</h3><p>入り組んだ環構造が特徴の植物アルカロイド。少量でも強い毒性を持つ。</p></article>
-      <article class="compound-card"><h3>Sucrose</h3><p>ブドウ糖と果糖からなる二糖。多数の水酸基を持つ身近な糖。</p></article>
-      <article class="compound-card"><h3>Adenosine triphosphate</h3><p>ATP。リン酸結合を介して細胞内のエネルギー移動に使われる。</p></article>
-      <article class="compound-card"><h3>Porphine</h3><p>ヘモグロビンやクロロフィルの骨格につながる、大きな環状共役系の基本骨格。</p></article>
-      <article class="compound-card"><h3>Penicillin V</h3><p>β-ラクタム環を持つ抗菌薬。環ひずみを観察しやすい。</p></article>
-      <article class="compound-card"><h3>Hexahelicene</h3><p>らせん状にねじれた多環芳香族炭化水素。分子そのものがキラルになる。</p></article>
-      <article class="compound-card"><h3>Mirex</h3><p>塩素を多く含む籠状の有機塩素化合物。環境残留性で知られる。</p></article>
-      <article class="compound-card"><h3>Tetrodotoxin</h3><p>フグ毒として知られる高極性の天然毒。ナトリウムチャネルに作用する。</p></article>
-      <article class="compound-card"><h3>Capsaicin</h3><p>トウガラシの辛味成分。芳香環、アミド、長い炭素鎖を併せ持つ。</p></article>
-      <article class="compound-card"><h3>1-Methylsilatrane</h3><p>ケイ素と窒素を含むかご形分子。中心原子をまたぐ結合が特徴。</p></article>
-      <article class="compound-card"><h3>Reserpine</h3><p>インドジャボク由来の複雑なアルカロイド。かつて降圧薬として用いられた。</p></article>
-      <article class="compound-card"><h3>Ergotamine</h3><p>麦角アルカロイドの一種。多環式骨格とペプチド様部分を持つ。</p></article>
-      <article class="compound-card"><h3>Doxorubicin</h3><p>アントラサイクリン系の抗がん薬。平面性の高い環と糖が組み合わさる。</p></article>
-      <article class="compound-card"><h3>Tetracycline</h3><p>4つの縮合環を持つ広域抗菌薬。多くの酸素原子を含む。</p></article>
-      <article class="compound-card"><h3>Cryptand-222</h3><p>金属イオンを包み込める三次元の大環状配位子。</p></article>
-      <article class="compound-card"><h3>Astaxanthin</h3><p>甲殻類などの赤橙色を担うカロテノイド。長い共役二重結合系を持つ。</p></article>
-      <article class="compound-card"><h3>Octanitrocubane</h3><p>立方体状の炭素骨格にニトロ基が付いた、高エネルギー密度の分子。</p></article>
-      <article class="compound-card"><h3>Dodecahedrane</h3><p>正十二面体の炭素骨格を持つ、非常に対称性の高い炭化水素。</p></article>
-      <article class="compound-card"><h3>Fullerene-C36</h3><p>炭素36個だけからなる閉じたフラーレンケージ。既定候補ではCID 101760755を使用。</p></article>
-      <article class="compound-card"><h3>Aconitine</h3><p>トリカブト由来の複雑なジテルペンアルカロイド。強い毒性を持つ。</p></article>
+      <article class="compound-card"><h3>Nanokid <span class="compound-formula">C<sub>39</sub>H<sub>42</sub>O<sub>2</sub></span></h3><p>人の形をした分子模型。分子設計の遊び心を感じられるナノアート。</p></article>
+      <article class="compound-card"><h3>Adamantane <span class="compound-formula">C<sub>10</sub>H<sub>16</sub></span></h3><p>ダイヤモンド格子の一部を切り出したような、硬く対称性の高い炭化水素ケージ。</p></article>
+      <article class="compound-card"><h3>Caffeine <span class="compound-formula">C<sub>8</sub>H<sub>10</sub>N<sub>4</sub>O<sub>2</sub></span></h3><p>コーヒーや茶に含まれる、平面性の高い刺激性アルカロイド。</p></article>
+      <article class="compound-card"><h3>Cholesterol <span class="compound-formula">C<sub>27</sub>H<sub>46</sub>O</span></h3><p>細胞膜の性質を調整する、4つの環を持つステロール。</p></article>
+      <article class="compound-card"><h3>Perfluorohexanesulfonic acid <span class="compound-formula">C<sub>6</sub>HF<sub>13</sub>O<sub>3</sub>S</span></h3><p>炭素鎖の水素がフッ素に置換された、非常に安定な含フッ素界面活性剤。</p></article>
+      <article class="compound-card"><h3>Morphine <span class="compound-formula">C<sub>17</sub>H<sub>19</sub>NO<sub>3</sub></span></h3><p>ケシ由来の複雑な多環式アルカロイド。強い鎮痛作用で知られる。</p></article>
+      <article class="compound-card"><h3>Strychnine <span class="compound-formula">C<sub>21</sub>H<sub>22</sub>N<sub>2</sub>O<sub>2</sub></span></h3><p>入り組んだ環構造が特徴の植物アルカロイド。少量でも強い毒性を持つ。</p></article>
+      <article class="compound-card"><h3>Sucrose <span class="compound-formula">C<sub>12</sub>H<sub>22</sub>O<sub>11</sub></span></h3><p>ブドウ糖と果糖からなる二糖。多数の水酸基を持つ身近な糖。</p></article>
+      <article class="compound-card"><h3>Adenosine triphosphate <span class="compound-formula">C<sub>10</sub>H<sub>16</sub>N<sub>5</sub>O<sub>13</sub>P<sub>3</sub></span></h3><p>ATP。リン酸結合を介して細胞内のエネルギー移動に使われる。</p></article>
+      <article class="compound-card"><h3>Porphine <span class="compound-formula">C<sub>20</sub>H<sub>14</sub>N<sub>4</sub></span></h3><p>ヘモグロビンやクロロフィルの骨格につながる、大きな環状共役系の基本骨格。</p></article>
+      <article class="compound-card"><h3>Penicillin V <span class="compound-formula">C<sub>16</sub>H<sub>18</sub>N<sub>2</sub>O<sub>5</sub>S</span></h3><p>β-ラクタム環を持つ抗菌薬。環ひずみを観察しやすい。</p></article>
+      <article class="compound-card"><h3>Hexahelicene <span class="compound-formula">C<sub>26</sub>H<sub>16</sub></span></h3><p>らせん状にねじれた多環芳香族炭化水素。分子そのものがキラルになる。</p></article>
+      <article class="compound-card"><h3>Mirex <span class="compound-formula">C<sub>10</sub>Cl<sub>12</sub></span></h3><p>塩素を多く含む籠状の有機塩素化合物。環境残留性で知られる。</p></article>
+      <article class="compound-card"><h3>Tetrodotoxin <span class="compound-formula">C<sub>11</sub>H<sub>17</sub>N<sub>3</sub>O<sub>8</sub></span></h3><p>フグ毒として知られる高極性の天然毒。ナトリウムチャネルに作用する。</p></article>
+      <article class="compound-card"><h3>Capsaicin <span class="compound-formula">C<sub>18</sub>H<sub>27</sub>NO<sub>3</sub></span></h3><p>トウガラシの辛味成分。芳香環、アミド、長い炭素鎖を併せ持つ。</p></article>
+      <article class="compound-card"><h3>1-Methylsilatrane <span class="compound-formula">C<sub>7</sub>H<sub>15</sub>NO<sub>3</sub>Si</span></h3><p>ケイ素と窒素を含むかご形分子。中心原子をまたぐ結合が特徴。</p></article>
+      <article class="compound-card"><h3>Reserpine <span class="compound-formula">C<sub>33</sub>H<sub>40</sub>N<sub>2</sub>O<sub>9</sub></span></h3><p>インドジャボク由来の複雑なアルカロイド。かつて降圧薬として用いられた。</p></article>
+      <article class="compound-card"><h3>Ergotamine <span class="compound-formula">C<sub>33</sub>H<sub>35</sub>N<sub>5</sub>O<sub>5</sub></span></h3><p>麦角アルカロイドの一種。多環式骨格とペプチド様部分を持つ。</p></article>
+      <article class="compound-card"><h3>Doxorubicin <span class="compound-formula">C<sub>27</sub>H<sub>29</sub>NO<sub>11</sub></span></h3><p>アントラサイクリン系の抗がん薬。平面性の高い環と糖が組み合わさる。</p></article>
+      <article class="compound-card"><h3>Tetracycline <span class="compound-formula">C<sub>22</sub>H<sub>24</sub>N<sub>2</sub>O<sub>8</sub></span></h3><p>4つの縮合環を持つ広域抗菌薬。多くの酸素原子を含む。</p></article>
+      <article class="compound-card"><h3>Cryptand-222 <span class="compound-formula">C<sub>18</sub>H<sub>36</sub>N<sub>2</sub>O<sub>6</sub></span></h3><p>金属イオンを包み込める三次元の大環状配位子。</p></article>
+      <article class="compound-card"><h3>Astaxanthin <span class="compound-formula">C<sub>40</sub>H<sub>52</sub>O<sub>4</sub></span></h3><p>甲殻類などの赤橙色を担うカロテノイド。長い共役二重結合系を持つ。</p></article>
+      <article class="compound-card"><h3>Octanitrocubane <span class="compound-formula">C<sub>8</sub>N<sub>8</sub>O<sub>16</sub></span></h3><p>立方体状の炭素骨格にニトロ基が付いた、高エネルギー密度の分子。</p></article>
+      <article class="compound-card"><h3>Dodecahedrane <span class="compound-formula">C<sub>20</sub>H<sub>20</sub></span></h3><p>正十二面体の炭素骨格を持つ、非常に対称性の高い炭化水素。</p></article>
+      <article class="compound-card"><h3>Fullerene-C36 <span class="compound-formula">C<sub>36</sub></span></h3><p>炭素36個だけからなる閉じたフラーレンケージ。既定候補ではCID 101760755を使用。</p></article>
+      <article class="compound-card"><h3>Aconitine <span class="compound-formula">C<sub>34</sub>H<sub>47</sub>NO<sub>11</sub></span></h3><p>トリカブト由来の複雑なジテルペンアルカロイド。強い毒性を持つ。</p></article>
     </div>
   </section>
 
@@ -759,6 +779,7 @@
       <tr><td><kbd>B</kbd></td><td>背景色を切り替え</td></tr>
       <tr><td><kbd>G</kbd></td><td>光沢のON/OFF</td></tr>
       <tr><td><kbd>R</kbd></td><td>自動回転を切り替え</td></tr>
+      <tr><td><kbd>V</kbd></td><td>回転速度を切り替え</td></tr>
       <tr><td><kbd>Esc</kbd></td><td>モーダルやスクリーンセーバーを閉じる</td></tr>
     </table>
   </section>
