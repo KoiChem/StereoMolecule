@@ -1290,6 +1290,16 @@
             fetchMoleculeData(comp, true);
         }
 
+        function skipToNextSSMolecule() {
+            if (!ssActive) return false;
+            clearTimeout(ssTimer);
+            ssTimer = null;
+            if (ssFetchAbort) ssFetchAbort.abort();
+            ssFetchAbort = new AbortController();
+            loadNextSSMolecule();
+            return true;
+        }
+
         // ==========================================
         // ロジック・処理関数群
         // ==========================================
@@ -2658,6 +2668,11 @@
         // Key bindings
         document.addEventListener('keydown', (e) => {
             if (ssActive) {
+                if (e.key.toLowerCase() === 'n') {
+                    e.preventDefault();
+                    skipToNextSSMolecule();
+                    return;
+                }
                 if (ssSettings.exitMode === 'strict') {
                     if (e.key === 'Escape' || (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'p')) stopScreenSaver();
                 } else {
