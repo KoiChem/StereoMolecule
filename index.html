@@ -230,6 +230,9 @@
             flex-direction: column;
             gap: 4px;
         }
+        #btn-rotate-speed .speed-arrow {
+            transition: stroke 0.2s ease;
+        }
 
         /* モーダル用CSS */
         #ss-overlay {
@@ -624,11 +627,11 @@
                                 <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38"/>
                             </svg>
                         </button>
-                        <button class="icon-btn active" id="btn-rotate-speed" title="Rotation Speed: Standard (180°/10s) [v]">
+                        <button class="icon-btn" id="btn-rotate-speed" title="Rotation Speed: Standard (180°/10s) [v]">
                             <svg viewBox="0 0 24 24">
-                                <path d="M4 17a8 8 0 0 1 16 0"/>
-                                <path d="M7.5 12.5l1.4 1.4M12 10v2M16.5 12.5l-1.4 1.4"/>
-                                <line id="rotate-speed-needle" x1="12" y1="17" x2="12" y2="8"/>
+                                <path class="speed-arrow" id="rotate-speed-arrow-slow" d="M6 17V12m-2 3 2-3 2 3"/>
+                                <path class="speed-arrow" id="rotate-speed-arrow-standard" d="M12 17V9m-2.5 3 2.5-3 2.5 3"/>
+                                <path class="speed-arrow" id="rotate-speed-arrow-fast" d="M18 17V5m-3 3 3-3 3 3"/>
                             </svg>
                         </button>
                     </div>
@@ -794,8 +797,8 @@
         const STEREO_TITLES = ['Stereo: Cross-eyed [s]', 'Stereo: Parallel [s]', 'Stereo: Single [s]'];
         const DEPTH_VALUES = [0.28, 0.55, 0.85];
         const DEPTH_TITLES = ['Depth: Normal [d]', 'Depth: Deep [d]', 'Depth: Very Deep [d]'];
-        const ROTATE_SPEEDS = [9.0, 18.0, 30.0];
-        const ROTATE_SPEED_TITLES = ['Slow (180°/20s)', 'Standard (180°/10s)', 'Fast (180°/6s)'];
+        const ROTATE_SPEEDS = [10.0, 18.0, 30.0];
+        const ROTATE_SPEED_TITLES = ['Slow (180°/18s)', 'Standard (180°/10s)', 'Fast (180°/6s)'];
         
         const MODEL_TITLES = { 
             'ballstick': 'Model: Ball and Stick [m]', 
@@ -2463,7 +2466,11 @@
 
         const btnAutoRotate = document.getElementById('btn-autorotate');
         const btnRotateSpeed = document.getElementById('btn-rotate-speed');
-        const rotateSpeedNeedle = document.getElementById('rotate-speed-needle');
+        const rotateSpeedArrows = [
+            document.getElementById('rotate-speed-arrow-slow'),
+            document.getElementById('rotate-speed-arrow-standard'),
+            document.getElementById('rotate-speed-arrow-fast')
+        ];
         function updateAutoRotateButton() {
             btnAutoRotate.classList.remove('active', 'reverse');
             if (isAutoRotating) btnAutoRotate.classList.add('active');
@@ -2472,12 +2479,12 @@
             btnAutoRotate.title = `Rotation: ${directionLabel} (${ROTATE_SPEED_TITLES[currentRotateIndex]}) [r]`;
         }
         function updateRotateSpeedButton() {
-            btnRotateSpeed.classList.remove('active', 'level-2');
-            btnRotateSpeed.classList.add('active');
-            if (currentRotateIndex === 2) btnRotateSpeed.classList.add('level-2');
-            const needleEnds = [[8.2, 12.2], [12, 8], [15.8, 12.2]];
-            rotateSpeedNeedle.setAttribute('x2', needleEnds[currentRotateIndex][0]);
-            rotateSpeedNeedle.setAttribute('y2', needleEnds[currentRotateIndex][1]);
+            const arrowColors = [
+                ['var(--text-active)', 'rgba(255,255,255,0.35)', 'rgba(255,255,255,0.35)'],
+                ['var(--text-active)', 'var(--text-active)', 'rgba(255,255,255,0.35)'],
+                ['var(--text-active-lvl2)', 'var(--text-active-lvl2)', 'var(--text-active-lvl2)']
+            ];
+            rotateSpeedArrows.forEach((arrow, index) => { arrow.style.stroke = arrowColors[currentRotateIndex][index]; });
             btnRotateSpeed.title = `Rotation Speed: ${ROTATE_SPEED_TITLES[currentRotateIndex]} [v]`;
         }
         async function updateWakeLock() {
