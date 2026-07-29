@@ -474,21 +474,37 @@
             display: none !important;
         }
 
-        /* 縦画面用UI：下部パネルを縦積み・折り返しにして画面内に収める */
+        /* 縦画面用UI：操作を4列×2行へ固定し、速度ボタンも2行内に収める */
         @media (max-width: 1024px) and (orientation: portrait), (pointer: coarse) and (orientation: portrait) {
             #ui-wrapper {
                 flex-direction: column;
                 gap: 10px;
             }
             #control-panel {
-                flex-wrap: wrap;
+                display: grid;
+                grid-template-columns: repeat(4, 30px);
+                grid-template-rows: repeat(2, 30px);
+                column-gap: 8px;
+                row-gap: 8px;
                 justify-content: center;
-                max-width: min(92vw, 320px);
-                row-gap: 10px;
+                align-items: center;
+                max-width: 92vw;
             }
-            .ui-group {
-                border-right: none;
-                padding-right: 0;
+            #control-panel > .ui-group {
+                display: contents;
+            }
+            #btn-stereo { grid-column: 1; grid-row: 1; }
+            #btn-depth { grid-column: 2; grid-row: 1; }
+            #btn-model { grid-column: 3; grid-row: 1; }
+            #btn-bg { grid-column: 1; grid-row: 2; }
+            #btn-gloss { grid-column: 2; grid-row: 2; }
+            #btn-ss { grid-column: 3; grid-row: 2; }
+            .rotation-controls {
+                grid-column: 4;
+                grid-row: 1 / 3;
+                align-self: stretch;
+                justify-content: space-between;
+                gap: 0;
             }
             #search-container {
                 max-width: 92vw;
