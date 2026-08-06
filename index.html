@@ -804,6 +804,18 @@
             'DEFAULT': { color: 0x888888, radius: 1.50 }
         };
 
+        const ATOMIC_SYMBOLS = [
+            null, 'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne', 'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar',
+            'K', 'Ca', 'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn', 'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr',
+            'Rb', 'Sr', 'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In', 'Sn', 'Sb', 'Te', 'I', 'Xe'
+        ];
+        const OFFLINE_MOLECULES_URL = './assets/default-molecules.json';
+        const MOLECULE_CACHE_DB = 'stereo-molecule-cache';
+        const MOLECULE_CACHE_STORE = 'molecules';
+        const PUBCHEM_MIN_INTERVAL_MS = 1100;
+        const PUBCHEM_COOLDOWN_MS = 30000;
+        const MOLECULE_FETCH_TIMEOUT_MS = 12000;
+
         const BG_COLORS = {
             'white': 0xffffff,
             'gray': 0xdadada,
@@ -942,6 +954,13 @@
         if (typeof ssSettings.nameShake === 'undefined') ssSettings.nameShake = "true";
         let currentDisplayedMoleculeName = 'L-cysteine';
         let moleculeFetchRequestId = 0;
+        let moleculeFetchAbort = null;
+        let bundledMoleculesPromise = null;
+        const moleculeMemoryCache = new Map();
+        let moleculeCacheDbPromise = null;
+        let pubChemRequestQueue = Promise.resolve();
+        let pubChemNextRequestAt = 0;
+        let pubChemCooldownUntil = 0;
         
         let ssActive = false;
         let ssTimer = null;
@@ -1399,7 +1418,233 @@
                     break;
                 }
             }
-            return { atoms, bonds, formula };
+            return { atoms, bonds, formula: formula || buildHillFormula(atoms.map(atom => atom.element)) };
+        }
+
+        function buildHillFormula(elements) {
+            const counts = new Map();
+            elements.forEach(element => counts.set(element, (counts.get(element) || 0) + 1));
+            const ordered = [];
+            if (counts.has('C')) ordered.push('C');
+            if (counts.has('H')) ordered.push('H');
+            Array.from(counts.keys()).filter(element => element !== 'C' && element !== 'H').sort().forEach(element => ordered.push(element));
+            return ordered.map(element => `${element}${counts.get(element) === 1 ? '' : counts.get(element)}`).join('');
+        }
+
+        function parsePubChemJson(record) {
+            const compound = record?.PC_Compounds?.[0];
+            const atomIds = compound?.atoms?.aid;
+            const atomNumbers = compound?.atoms?.element;
+            const coordinateSet = compound?.coords?.find(coords => coords?.conformers?.[0]?.x && coords?.conformers?.[0]?.y && coords?.conformers?.[0]?.z);
+            const conformer = coordinateSet?.conformers?.[0];
+            if (!compound || !Array.isArray(atomIds) || !Array.isArray(atomNumbers) || !coordinateSet || !conformer) {
+                throw new Error('PubChemの3D構造データを読み取れませんでした。');
+            }
+
+            const coordinatesByAid = new Map();
+            coordinateSet.aid.forEach((aid, index) => {
+                coordinatesByAid.set(aid, { x: conformer.x[index], y: conformer.y[index], z: conformer.z[index] });
+            });
+            const atomIndexByAid = new Map();
+            const atoms = atomIds.map((aid, index) => {
+                const coordinate = coordinatesByAid.get(aid);
+                const element = ATOMIC_SYMBOLS[atomNumbers[index]] || 'DEFAULT';
+                if (!coordinate || !Number.isFinite(coordinate.x) || !Number.isFinite(coordinate.y) || !Number.isFinite(coordinate.z)) {
+                    throw new Error('PubChemの3D座標が不完全です。');
+                }
+                atomIndexByAid.set(aid, index);
+                return { ...coordinate, element };
+            });
+            const bonds = (compound.bonds?.aid1 || []).map((aid1, index) => ({
+                a: atomIndexByAid.get(aid1),
+                b: atomIndexByAid.get(compound.bonds.aid2[index]),
+                order: compound.bonds.order[index] || 1
+            })).filter(bond => Number.isInteger(bond.a) && Number.isInteger(bond.b));
+            return { atoms, bonds, formula: buildHillFormula(atoms.map(atom => atom.element)) };
+        }
+
+        function normalizeMoleculeKey(value) {
+            return String(value || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+        }
+
+        function moleculeKeys(query, cid) {
+            const keys = [normalizeMoleculeKey(query)];
+            if (cid) keys.push(`cid:${cid}`);
+            return [...new Set(keys.filter(Boolean))];
+        }
+
+        function loadBundledMolecules() {
+            if (!bundledMoleculesPromise) {
+                bundledMoleculesPromise = fetch(OFFLINE_MOLECULES_URL)
+                    .then(response => {
+                        if (!response.ok) throw new Error(`Offline molecule bundle: ${response.status}`);
+                        return response.json();
+                    })
+                    .then(bundle => {
+                        const bundled = new Map();
+                        Object.entries(bundle?.molecules || {}).forEach(([key, molecule]) => {
+                            bundled.set(normalizeMoleculeKey(key), molecule);
+                            bundled.set(normalizeMoleculeKey(molecule.name), molecule);
+                            if (molecule.cid) bundled.set(`cid:${molecule.cid}`, molecule);
+                        });
+                        return bundled;
+                    })
+                    .catch(error => {
+                        console.warn('Offline molecule bundle could not be loaded.', error);
+                        return new Map();
+                    });
+            }
+            return bundledMoleculesPromise;
+        }
+
+        function openMoleculeCacheDb() {
+            if (moleculeCacheDbPromise) return moleculeCacheDbPromise;
+            if (!window.indexedDB) return Promise.resolve(null);
+            moleculeCacheDbPromise = new Promise(resolve => {
+                const request = indexedDB.open(MOLECULE_CACHE_DB, 1);
+                request.onupgradeneeded = () => request.result.createObjectStore(MOLECULE_CACHE_STORE);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => resolve(null);
+            });
+            return moleculeCacheDbPromise;
+        }
+
+        async function readPersistentMolecule(key) {
+            const db = await openMoleculeCacheDb();
+            if (!db) return null;
+            return new Promise(resolve => {
+                const request = db.transaction(MOLECULE_CACHE_STORE, 'readonly').objectStore(MOLECULE_CACHE_STORE).get(key);
+                request.onsuccess = () => resolve(request.result?.data || null);
+                request.onerror = () => resolve(null);
+            });
+        }
+
+        async function cacheMolecule(keys, data) {
+            keys.forEach(key => moleculeMemoryCache.set(key, data));
+            const db = await openMoleculeCacheDb();
+            if (!db) return;
+            try {
+                const transaction = db.transaction(MOLECULE_CACHE_STORE, 'readwrite');
+                keys.forEach(key => transaction.objectStore(MOLECULE_CACHE_STORE).put({ data, savedAt: Date.now() }, key));
+            } catch (error) {
+                console.warn('Molecule cache write failed.', error);
+            }
+        }
+
+        async function findCachedMolecule(keys) {
+            const bundled = await loadBundledMolecules();
+            for (const key of keys) {
+                if (bundled.has(key)) return { data: bundled.get(key), source: 'offline' };
+                if (moleculeMemoryCache.has(key)) return { data: moleculeMemoryCache.get(key), source: 'cache' };
+            }
+            for (const key of keys) {
+                const cached = await readPersistentMolecule(key);
+                if (cached) {
+                    keys.forEach(cacheKey => moleculeMemoryCache.set(cacheKey, cached));
+                    return { data: cached, source: 'cache' };
+                }
+            }
+            return null;
+        }
+
+        function abortError() {
+            return new DOMException('The molecule request was aborted.', 'AbortError');
+        }
+
+        function waitWithSignal(milliseconds, signal) {
+            if (!milliseconds) return Promise.resolve();
+            return new Promise((resolve, reject) => {
+                if (signal?.aborted) return reject(abortError());
+                const timer = setTimeout(resolve, milliseconds);
+                signal?.addEventListener('abort', () => {
+                    clearTimeout(timer);
+                    reject(abortError());
+                }, { once: true });
+            });
+        }
+
+        async function fetchWithTimeout(url, signal) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), MOLECULE_FETCH_TIMEOUT_MS);
+            const abort = () => controller.abort();
+            signal?.addEventListener('abort', abort, { once: true });
+            try {
+                return await fetch(url, { signal: controller.signal });
+            } catch (error) {
+                if (controller.signal.aborted && !signal?.aborted) {
+                    const timeoutError = new Error('Structure request timed out.');
+                    timeoutError.isTimeout = true;
+                    throw timeoutError;
+                }
+                throw error;
+            } finally {
+                clearTimeout(timeout);
+                signal?.removeEventListener('abort', abort);
+            }
+        }
+
+        function enqueuePubChem(request, signal) {
+            const queued = pubChemRequestQueue.catch(() => {}).then(async () => {
+                const wait = Math.max(0, pubChemNextRequestAt - Date.now());
+                await waitWithSignal(wait, signal);
+                pubChemNextRequestAt = Date.now() + PUBCHEM_MIN_INTERVAL_MS;
+                return request();
+            });
+            pubChemRequestQueue = queued.catch(() => {});
+            return queued;
+        }
+
+        async function fetchPubChemMolecule(query, cid, signal) {
+            const url = cid
+                ? `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${cid}/JSON?record_type=3d`
+                : `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(query)}/JSON?record_type=3d`;
+            const response = await enqueuePubChem(() => fetchWithTimeout(url, signal), signal);
+            if (!response.ok) {
+                const error = new Error(`PubChem request failed (${response.status})`);
+                error.status = response.status;
+                throw error;
+            }
+            return parsePubChemJson(await response.json());
+        }
+
+        async function fetchCidSmiles(cid, signal) {
+            const url = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${cid}/property/IsomericSMILES/JSON`;
+            const response = await enqueuePubChem(() => fetchWithTimeout(url, signal), signal);
+            if (!response.ok) throw new Error(`PubChem SMILES request failed (${response.status})`);
+            const data = await response.json();
+            return data?.PropertyTable?.Properties?.[0]?.SMILES || null;
+        }
+
+        async function fetchCirMolecule(identifier, signal) {
+            const url = `https://cactus.nci.nih.gov/chemical/structure/${encodeURIComponent(identifier)}/file?format=sdf&get3d=True`;
+            const response = await fetchWithTimeout(url, signal);
+            if (!response.ok) throw new Error(`CIR request failed (${response.status})`);
+            return parseSDF(await response.text());
+        }
+
+        async function fetchRemoteMolecule(query, cid, signal) {
+            let pubChemError = null;
+            if (Date.now() >= pubChemCooldownUntil) {
+                try {
+                    return { data: await fetchPubChemMolecule(query, cid, signal), source: 'pubchem' };
+                } catch (error) {
+                    if (error.name === 'AbortError') throw error;
+                    pubChemError = error;
+                    if (!error.status || error.status >= 500) pubChemCooldownUntil = Date.now() + PUBCHEM_COOLDOWN_MS;
+                }
+            }
+
+            try {
+                if (cid && (!pubChemError || pubChemError.status !== 500)) {
+                    throw pubChemError || new Error('PubChemは一時休止中です。');
+                }
+                const cirIdentifier = cid ? await fetchCidSmiles(cid, signal) : query;
+                if (!cirIdentifier) throw new Error('CIDからSMILESを取得できませんでした。');
+                return { data: await fetchCirMolecule(cirIdentifier, signal), source: 'cir' };
+            } catch (cirError) {
+                if (cirError.name === 'AbortError') throw cirError;
+                throw pubChemError || cirError;
+            }
         }
 
         function getCurrentEyeAspect() {
@@ -1433,8 +1678,9 @@
         }
 
         async function fetchCompoundTitle(cid, signal) {
+            if (Date.now() < pubChemCooldownUntil) return null;
             const titleUrl = `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${cid}/property/Title/JSON`;
-            const response = await fetch(titleUrl, signal ? { signal } : undefined);
+            const response = await enqueuePubChem(() => fetchWithTimeout(titleUrl, signal), signal);
             if (!response.ok) return null;
             const titleData = await response.json();
             return titleData?.PropertyTable?.Properties?.[0]?.Title || null;
@@ -1636,7 +1882,11 @@
         async function fetchMoleculeData(query, isSS = false) {
             let cleanQuery = query.trim();
             const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(cleanQuery);
-            const signal = isSS ? ssFetchAbort?.signal : undefined;
+            if (!isSS) {
+                if (moleculeFetchAbort) moleculeFetchAbort.abort();
+                moleculeFetchAbort = new AbortController();
+            }
+            const signal = isSS ? ssFetchAbort?.signal : moleculeFetchAbort?.signal;
             const requestId = isSS ? null : ++moleculeFetchRequestId;
             const isStaleRequest = () => (isSS && (!ssActive || (signal && signal.aborted)))
                 || (!isSS && requestId !== moleculeFetchRequestId);
@@ -1666,29 +1916,26 @@
             if (isStaleRequest()) return;
 
             const compoundCid = getCompoundCid(cleanQuery);
-            const cleanQueryEncoded = encodeURIComponent(cleanQuery);
-            const url = compoundCid
-                ? `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${compoundCid}/SDF?record_type=3d`
-                : `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${cleanQueryEncoded}/SDF?record_type=3d`;
-            const titlePromise = compoundCid && !COMPOUND_DISPLAY_NAMES[compoundCid]
-                ? fetchCompoundTitle(compoundCid, signal).catch(() => null)
-                : Promise.resolve(null);
+            const cacheKeys = moleculeKeys(cleanQuery, compoundCid);
             
             try {
-                const response = await fetch(url, signal ? { signal } : undefined);
-                if (isStaleRequest()) return;
-                if (!response.ok) throw new Error("指定された化合物・示性式が見つかりません。");
-                
-                const sdfText = await response.text();
+                let result = await findCachedMolecule(cacheKeys);
                 if (isStaleRequest()) return;
 
-                const parsedData = parseSDF(sdfText);
+                if (!result) {
+                    result = await fetchRemoteMolecule(cleanQuery, compoundCid, signal);
+                    if (isStaleRequest()) return;
+                    await cacheMolecule(cacheKeys, result.data);
+                }
+                const parsedData = result.data;
                 if (isSS) applySSPendingFx();
                 buildMoleculeGeometry(parsedData, false); 
                 window.currentSdfData = parsedData;
                 if (!isSS) currentDisplayedMoleculeName = cleanQuery;
 
-                const compoundTitle = await titlePromise;
+                const compoundTitle = compoundCid && !COMPOUND_DISPLAY_NAMES[compoundCid]
+                    ? await fetchCompoundTitle(compoundCid, signal).catch(() => null)
+                    : null;
                 if (isStaleRequest()) return;
                 let labelText = compoundCid
                     ? getCompoundDisplayName(compoundCid, compoundTitle, cleanQuery)
@@ -1710,9 +1957,9 @@
                     if (!ssActive) return;
                     ssPendingFx = null;
                     ssFailCount++;
-                    ssTimer = setTimeout(loadNextSSMolecule, 1000); 
+                    ssTimer = setTimeout(loadNextSSMolecule, Math.max(PUBCHEM_COOLDOWN_MS, ssSettings.interval * 1000));
                 } else {
-                    showNotification(error.message);
+                    showNotification('構造データを取得できません。しばらくしてから再試行してください。');
                 }
             }
         }
@@ -2397,6 +2644,10 @@
 
             list.push(moleculeName);
             saveRegisteredCompounds(list);
+            if (window.currentSdfData) {
+                cacheMolecule(moleculeKeys(moleculeName, getCompoundCid(moleculeName)), window.currentSdfData)
+                    .catch(error => console.warn('Registered molecule cache failed.', error));
+            }
             renderCompoundPickList();
             showNotification('表示中の分子を登録しました。');
         });
