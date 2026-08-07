@@ -1940,7 +1940,6 @@
                 let labelText = compoundCid
                     ? getCompoundDisplayName(compoundCid, compoundTitle, cleanQuery)
                     : cleanQuery;
-                if (parsedData.formula) labelText += ` (${parsedData.formula})`;
                 document.getElementById('label-left').textContent = labelText;
                 
                 if (isSS) {
