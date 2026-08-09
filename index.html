@@ -984,6 +984,7 @@
         // SS用：カメラ/ワールド混合 + 軸漂い回転
         let ssRotateClockTime = 0;
         const ssRotateAxis = new THREE.Vector3();
+        const ssRotateAxisGuide = new THREE.Vector3();
         const ssRotateAxisTarget = new THREE.Vector3();
         const ssCameraAxis = new THREE.Vector3();
         const ssWorldAxis = new THREE.Vector3();
@@ -992,16 +993,19 @@
         const ssTmpVec = new THREE.Vector3();
         const ssAxisPerp = new THREE.Vector3();
         const ssAxisRandomHelper = new THREE.Vector3();
+        const ssSlerpOrtho = new THREE.Vector3();
         const ssMotionRight = new THREE.Vector3();
         const ssMotionUp = new THREE.Vector3();
         let ssAxisTargetChangeAt = 0;
-        let ssAxisFollowRate = 0.42;
+        let ssMajorAxisChangeAt = 0;
+        let ssAxisGuideFollowRate = 0.45;
+        let ssAxisFollowRate = 0.25;
         let ssAxisBlend = 0.5;
         let ssAxisBlendTarget = 0.5;
         let ssAxisBlendChangeAt = 0;
         let ssAxisBlendFollowRate = 0.24;
-        let ssAxisRandomWeight = 0.36;
-        let ssAxisRandomWeightTarget = 0.36;
+        let ssAxisRandomWeight = 0.52;
+        let ssAxisRandomWeightTarget = 0.52;
         let ssAxisRandomWeightChangeAt = 0;
         let ssAxisRandomWeightFollowRate = 0.3;
         let ssSpeedPhaseA = 0;
@@ -1020,23 +1024,41 @@
             return min + Math.random() * (max - min);
         }
 
-        // 今の向きの近くを次の目標にする。反対向きへの急な補間を避けつつ、
-        // ときどき大きく曲がることでランダム感を保つ。
-        function pickNextSSRotateAxisTarget() {
+        function slerpUnitVector(out, from, to, alpha) {
+            const dot = THREE.MathUtils.clamp(from.dot(to), -1, 1);
+            if (dot > 0.9995) return out.copy(from).lerp(to, alpha).normalize();
+
+            // ほぼ反対向きでもゼロベクトルを通らず、球面上を安定して移動する。
+            if (dot < -0.9995) {
+                ssSlerpOrtho.set(1, 0, 0).cross(from);
+                if (ssSlerpOrtho.lengthSq() < 1e-6) ssSlerpOrtho.set(0, 1, 0).cross(from);
+                ssSlerpOrtho.normalize();
+                const angle = Math.PI * alpha;
+                return out.copy(from).multiplyScalar(Math.cos(angle))
+                    .addScaledVector(ssSlerpOrtho, Math.sin(angle)).normalize();
+            }
+
+            const theta = Math.acos(dot);
+            const sinTheta = Math.sin(theta);
+            const fromWeight = Math.sin((1 - alpha) * theta) / sinTheta;
+            const toWeight = Math.sin(alpha * theta) / sinTheta;
+            return out.copy(from).multiplyScalar(fromWeight).addScaledVector(to, toWeight).normalize();
+        }
+
+        // 中間軸を基準に大きな目標変更を作り、二段階の球面補間で追従させる。
+        function pickNextSSRotateAxisTarget(isMajorTurn = false) {
             randomUnitVector3(ssAxisRandomHelper);
             ssAxisPerp.copy(ssAxisRandomHelper)
-                .addScaledVector(ssRotateAxis, -ssAxisRandomHelper.dot(ssRotateAxis));
+                .addScaledVector(ssRotateAxisGuide, -ssAxisRandomHelper.dot(ssRotateAxisGuide));
             if (ssAxisPerp.lengthSq() < 1e-6) {
-                ssAxisPerp.set(1, 0, 0).cross(ssRotateAxis);
-                if (ssAxisPerp.lengthSq() < 1e-6) ssAxisPerp.set(0, 1, 0).cross(ssRotateAxis);
+                ssAxisPerp.set(1, 0, 0).cross(ssRotateAxisGuide);
+                if (ssAxisPerp.lengthSq() < 1e-6) ssAxisPerp.set(0, 1, 0).cross(ssRotateAxisGuide);
             }
             ssAxisPerp.normalize();
 
-            const turnDegrees = Math.random() < 0.16
-                ? randomRange(70, 100)
-                : randomRange(25, 65);
+            const turnDegrees = isMajorTurn ? randomRange(110, 140) : randomRange(50, 95);
             const turnRadians = THREE.MathUtils.degToRad(turnDegrees);
-            ssRotateAxisTarget.copy(ssRotateAxis)
+            ssRotateAxisTarget.copy(ssRotateAxisGuide)
                 .multiplyScalar(Math.cos(turnRadians))
                 .addScaledVector(ssAxisPerp, Math.sin(turnRadians))
                 .normalize();
@@ -1045,18 +1067,21 @@
         function initSSRotateState() {
             ssRotateClockTime = 0;
             randomUnitVector3(ssRotateAxis);
-            pickNextSSRotateAxisTarget();
+            ssRotateAxisGuide.copy(ssRotateAxis);
+            pickNextSSRotateAxisTarget(false);
 
-            ssAxisTargetChangeAt = randomRange(3, 9);
-            ssAxisFollowRate = randomRange(0.30, 0.58);
+            ssAxisTargetChangeAt = randomRange(3, 7);
+            ssMajorAxisChangeAt = randomRange(15, 20);
+            ssAxisGuideFollowRate = randomRange(0.35, 0.55);
+            ssAxisFollowRate = randomRange(0.18, 0.32);
             ssAxisBlend = randomRange(0.35, 0.65);
             ssAxisBlendTarget = randomRange(0.20, 0.80);
             ssAxisBlendChangeAt = randomRange(6, 15);
             ssAxisBlendFollowRate = randomRange(0.18, 0.35);
-            ssAxisRandomWeight = randomRange(0.30, 0.40);
-            ssAxisRandomWeightTarget = randomRange(0.30, 0.45);
-            ssAxisRandomWeightChangeAt = randomRange(5, 12);
-            ssAxisRandomWeightFollowRate = randomRange(0.22, 0.38);
+            ssAxisRandomWeight = randomRange(0.45, 0.55);
+            ssAxisRandomWeightTarget = randomRange(0.45, 0.65);
+            ssAxisRandomWeightChangeAt = randomRange(5, 10);
+            ssAxisRandomWeightFollowRate = randomRange(0.18, 0.32);
 
             ssSpeedPhaseA = Math.random() * Math.PI * 2;
             ssSpeedPhaseB = Math.random() * Math.PI * 2;
@@ -2112,9 +2137,12 @@
                     ssRotateClockTime += delta;
 
                     if (ssRotateClockTime >= ssAxisTargetChangeAt) {
-                        pickNextSSRotateAxisTarget();
-                        ssAxisTargetChangeAt = ssRotateClockTime + randomRange(3, 9);
-                        ssAxisFollowRate = randomRange(0.30, 0.58);
+                        const isMajorTurn = ssRotateClockTime >= ssMajorAxisChangeAt;
+                        pickNextSSRotateAxisTarget(isMajorTurn);
+                        ssAxisTargetChangeAt = ssRotateClockTime + randomRange(3, 7);
+                        ssAxisGuideFollowRate = randomRange(0.35, 0.55);
+                        ssAxisFollowRate = randomRange(0.18, 0.32);
+                        if (isMajorTurn) ssMajorAxisChangeAt = ssRotateClockTime + randomRange(15, 20);
                     }
                     if (ssRotateClockTime >= ssAxisBlendChangeAt) {
                         ssAxisBlendTarget = randomRange(0.20, 0.80);
@@ -2122,15 +2150,17 @@
                         ssAxisBlendFollowRate = randomRange(0.18, 0.35);
                     }
                     if (ssRotateClockTime >= ssAxisRandomWeightChangeAt) {
-                        ssAxisRandomWeightTarget = randomRange(0.30, 0.45);
-                        ssAxisRandomWeightChangeAt = ssRotateClockTime + randomRange(5, 12);
-                        ssAxisRandomWeightFollowRate = randomRange(0.22, 0.38);
+                        ssAxisRandomWeightTarget = randomRange(0.45, 0.65);
+                        ssAxisRandomWeightChangeAt = ssRotateClockTime + randomRange(5, 10);
+                        ssAxisRandomWeightFollowRate = randomRange(0.18, 0.32);
                     }
 
+                    const guideFollow = 1 - Math.exp(-ssAxisGuideFollowRate * delta);
                     const axisFollow = 1 - Math.exp(-ssAxisFollowRate * delta);
                     const blendFollow = 1 - Math.exp(-ssAxisBlendFollowRate * delta);
                     const randomWeightFollow = 1 - Math.exp(-ssAxisRandomWeightFollowRate * delta);
-                    ssRotateAxis.lerp(ssRotateAxisTarget, axisFollow).normalize();
+                    slerpUnitVector(ssRotateAxisGuide, ssRotateAxisGuide, ssRotateAxisTarget, guideFollow);
+                    slerpUnitVector(ssRotateAxis, ssRotateAxis, ssRotateAxisGuide, axisFollow);
                     ssAxisBlend += (ssAxisBlendTarget - ssAxisBlend) * blendFollow;
                     ssAxisRandomWeight += (ssAxisRandomWeightTarget - ssAxisRandomWeight) * randomWeightFollow;
 
@@ -2142,7 +2172,7 @@
                         .addScaledVector(ssWorldAxis, 1 - ssAxisBlend).normalize();
 
                     const angle = THREE.MathUtils.degToRad(currentRotateSpeed * getSSSpeedMultiplier()) * delta;
-                    ssFinalAxis.copy(ssMixedAxis).lerp(ssRotateAxis, ssAxisRandomWeight).normalize();
+                    slerpUnitVector(ssFinalAxis, ssMixedAxis, ssRotateAxis, ssAxisRandomWeight);
                     moleculeGroup.rotateOnWorldAxis(ssFinalAxis, angle);
                 } else {
                     const angle = THREE.MathUtils.degToRad(currentRotateSpeed) * delta;
