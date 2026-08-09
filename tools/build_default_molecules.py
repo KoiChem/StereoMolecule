@@ -1,54 +1,67 @@
 #!/usr/bin/env python3
-"""Build the offline molecule bundle used by StereoMolecule.
+"""Build and verify the offline 3D molecule bundle used by StereoMolecule.
 
-The app consumes a small, renderer-ready JSON representation instead of
-requesting PubChem every time the default screen-saver list advances.  NCI/CIR
-is used for the ordinary names; the one CID-only default uses PubChem's JSON
-record endpoint because its name is deliberately not resolved by name.
+The application reads this bundle before attempting any network request, so
+every record must be a verified PubChem 3D conformer.  A build failure leaves
+the previously published bundle untouched rather than silently publishing a
+2D fallback.
 """
 
 from __future__ import annotations
 
 import json
+import math
+import sys
 import time
 import urllib.parse
 import urllib.request
 from collections import Counter
 from pathlib import Path
-import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "assets" / "default-molecules.json"
-DEFAULT_NAMES = [
-    "L-cysteine",
-    "nanokid",
-    "adamantane",
-    "caffeine",
-    "cholesterol",
-    "perfluorohexanesulfonic acid",
-    "morphine",
-    "strychnine",
-    "sucrose",
-    "adenosine triphosphate",
-    "porphine",
-    "penicillin v",
-    "hexahelicene",
-    "mirex",
-    "tetrodotoxin",
-    "capsaicin",
-    "1-methylsilatrane",
-    "reserpine",
-    "ergotamine",
-    "doxorubicin",
-    "tetracycline",
-    "cryptand-222",
-    "astaxanthin",
-    "octanitrocubane",
-    "dodecahedrane",
-    "aconitine",
+BUNDLE_VERSION = 2
+PUBCHEM_REQUEST_INTERVAL_SECONDS = 1.1
+
+# Pin each default to the CID selected for the screen saver.  This prevents a
+# synonym lookup from changing the displayed compound when the bundle is rebuilt.
+# The third value allows intentionally planar structures such as porphine.
+DEFAULT_COMPOUNDS = (
+    ("L-cysteine", "5862", False),
+    ("nanokid", "11353257", False),
+    ("adamantane", "9238", False),
+    ("caffeine", "2519", False),
+    ("cholesterol", "5997", False),
+    ("perfluorohexanesulfonic acid", "67734", False),
+    ("morphine", "5288826", False),
+    ("strychnine", "441071", False),
+    ("sucrose", "5988", False),
+    ("adenosine triphosphate", "5957", False),
+    ("porphine", "66868", True),
+    ("penicillin v", "6869", False),
+    ("hexahelicene", "98863", False),
+    ("mirex", "16945", False),
+    ("tetrodotoxin", "11174599", False),
+    ("capsaicin", "1548943", False),
+    ("1-methylsilatrane", "16797", False),
+    ("reserpine", "5770", False),
+    ("ergotamine", "8223", False),
+    ("doxorubicin", "31703", False),
+    ("tetracycline", "54675776", False),
+    ("cryptand-222", "72801", False),
+    ("astaxanthin", "5281224", False),
+    ("octanitrocubane", "11762357", False),
+    ("dodecahedrane", "123218", False),
+    ("aconitine", "245005", False),
+    ("Fullerene-C36", "101760755", False),
+)
+
+ELEMENTS = [
+    None, "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar",
+    "K", "Ca", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr",
+    "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te", "I", "Xe",
 ]
-CID_ONLY = {"Fullerene-C36": "101760755"}
 
 
 def normalized(value: str) -> str:
@@ -66,111 +79,166 @@ def hill_formula(elements: list[str]) -> str:
     return "".join(element + (str(counts[element]) if counts[element] != 1 else "") for element in ordered)
 
 
-def parse_sdf(sdf: str) -> dict:
-    lines = sdf.splitlines()
-    if len(lines) < 4:
-        raise ValueError("SDF has no counts line")
-    atom_count = int(lines[3][0:3].strip())
-    bond_count = int(lines[3][3:6].strip())
-    atoms = []
-    for line in lines[4 : 4 + atom_count]:
-        atoms.append({
-            "x": float(line[0:10].strip()),
-            "y": float(line[10:20].strip()),
-            "z": float(line[20:30].strip()),
-            "element": line[31:34].strip(),
-        })
-    bonds = []
-    for line in lines[4 + atom_count : 4 + atom_count + bond_count]:
-        bonds.append({
-            "a": int(line[0:3].strip()) - 1,
-            "b": int(line[3:6].strip()) - 1,
-            "order": int(line[6:9].strip()),
-        })
-    return {"atoms": atoms, "bonds": bonds, "formula": hill_formula([atom["element"] for atom in atoms])}
-
-
-ELEMENTS = [
-    None, "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar",
-    "K", "Ca", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr",
-    "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te", "I", "Xe",
-]
-
-
-def parse_pcjson(payload: dict) -> dict:
-    compound = payload["PC_Compounds"][0]
-    atoms = compound["atoms"]
-    coords = compound["coords"][0]
-    conformer = coords["conformers"][0]
-    by_aid = {}
-    for index, aid in enumerate(coords["aid"]):
-        by_aid[aid] = {
-            "x": conformer["x"][index],
-            "y": conformer["y"][index],
-            "z": conformer["z"][index],
-            "element": ELEMENTS[atoms["element"][index]],
-        }
-    ordered_aids = atoms["aid"]
-    atom_index = {aid: index for index, aid in enumerate(ordered_aids)}
-    result_atoms = [by_aid[aid] for aid in ordered_aids]
-    bonds = [
-        {"a": atom_index[a], "b": atom_index[b], "order": order}
-        for a, b, order in zip(compound["bonds"]["aid1"], compound["bonds"]["aid2"], compound["bonds"]["order"])
-    ]
-    return {"atoms": result_atoms, "bonds": bonds, "formula": hill_formula([atom["element"] for atom in result_atoms])}
-
-
 def get_text(url: str) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": "StereoMolecule offline bundle builder"})
+    request = urllib.request.Request(url, headers={"User-Agent": "StereoMolecule verified 3D bundle builder"})
     with urllib.request.urlopen(request, timeout=30) as response:
         return response.read().decode("utf-8")
 
 
-def cir_molecule(name: str) -> dict:
-    identifier = urllib.parse.quote(name, safe="")
-    url = f"https://cactus.nci.nih.gov/chemical/structure/{identifier}/file?format=sdf&get3d=True"
-    return parse_sdf(get_text(url))
+def get_pubchem_3d(cid: str) -> dict:
+    encoded_cid = urllib.parse.quote(cid, safe="")
+    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{encoded_cid}/JSON?record_type=3d"
+    return json.loads(get_text(url))
 
 
-def pubchem_molecule(namespace: str, identifier: str) -> dict:
-    encoded_identifier = urllib.parse.quote(identifier, safe="")
-    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/{namespace}/{encoded_identifier}/JSON?record_type=3d"
-    return parse_pcjson(json.loads(get_text(url)))
+def parse_pubchem_3d(payload: dict, expected_cid: str) -> dict:
+    compound = payload.get("PC_Compounds", [None])[0]
+    if not compound:
+        raise ValueError("PubChem record is missing")
+    received_cid = str(compound.get("id", {}).get("id", {}).get("cid", ""))
+    if received_cid != expected_cid:
+        raise ValueError(f"CID mismatch: expected {expected_cid}, received {received_cid or 'none'}")
+
+    atom_ids = compound.get("atoms", {}).get("aid")
+    atomic_numbers = compound.get("atoms", {}).get("element")
+    coordinate_set = next(
+        (
+            coords for coords in compound.get("coords", [])
+            if coords.get("aid") and coords.get("conformers")
+            and all(key in coords["conformers"][0] for key in ("x", "y", "z"))
+        ),
+        None,
+    )
+    if not isinstance(atom_ids, list) or not isinstance(atomic_numbers, list) or not coordinate_set:
+        raise ValueError("PubChem 3D coordinate set is missing")
+
+    conformer = coordinate_set["conformers"][0]
+    coordinate_ids = coordinate_set["aid"]
+    if not (len(coordinate_ids) == len(conformer["x"]) == len(conformer["y"]) == len(conformer["z"])):
+        raise ValueError("PubChem 3D coordinate array lengths do not match")
+
+    coordinates = {
+        aid: {"x": conformer["x"][index], "y": conformer["y"][index], "z": conformer["z"][index]}
+        for index, aid in enumerate(coordinate_ids)
+    }
+    atom_index = {aid: index for index, aid in enumerate(atom_ids)}
+    atoms = []
+    for index, aid in enumerate(atom_ids):
+        coordinate = coordinates.get(aid)
+        element = ELEMENTS[atomic_numbers[index]] if atomic_numbers[index] < len(ELEMENTS) else None
+        if not coordinate or not element:
+            raise ValueError("PubChem 3D coordinates do not cover every atom")
+        atoms.append({**coordinate, "element": element})
+
+    bonds = [
+        {"a": atom_index[aid1], "b": atom_index[aid2], "order": order}
+        for aid1, aid2, order in zip(
+            compound.get("bonds", {}).get("aid1", []),
+            compound.get("bonds", {}).get("aid2", []),
+            compound.get("bonds", {}).get("order", []),
+        )
+        if aid1 in atom_index and aid2 in atom_index
+    ]
+    return {"atoms": atoms, "bonds": bonds, "formula": hill_formula([atom["element"] for atom in atoms])}
+
+
+def spatial_shape_ratio(atoms: list[dict]) -> float:
+    """Return a scale-normalized 3D covariance determinant.
+
+    A strictly planar coordinate set has a zero determinant regardless of how
+    its plane is rotated.  The ratio is intentionally only used to reject a
+    numerical zero; it is not a chemistry or conformer-energy assessment.
+    """
+    count = len(atoms)
+    if count < 4:
+        return 0.0
+    center = {axis: sum(atom[axis] for atom in atoms) / count for axis in ("x", "y", "z")}
+    covariance = {
+        (left, right): sum((atom[left] - center[left]) * (atom[right] - center[right]) for atom in atoms) / count
+        for left in ("x", "y", "z") for right in ("x", "y", "z")
+    }
+    determinant = (
+        covariance[("x", "x")] * (covariance[("y", "y")] * covariance[("z", "z")] - covariance[("y", "z")] * covariance[("z", "y")])
+        - covariance[("x", "y")] * (covariance[("y", "x")] * covariance[("z", "z")] - covariance[("y", "z")] * covariance[("z", "x")])
+        + covariance[("x", "z")] * (covariance[("y", "x")] * covariance[("z", "y")] - covariance[("y", "y")] * covariance[("z", "x")])
+    )
+    scale = (covariance[("x", "x")] + covariance[("y", "y")] + covariance[("z", "z")]) / 3
+    return abs(determinant) / (scale ** 3) if scale > 0 else 0.0
+
+
+def validate_molecule(name: str, molecule: dict, allow_planar: bool) -> None:
+    atoms = molecule.get("atoms", [])
+    bonds = molecule.get("bonds", [])
+    if not atoms or not bonds or not molecule.get("formula"):
+        raise ValueError(f"{name}: atoms, bonds, or formula are missing")
+    if any(
+        not atom.get("element") or not all(math.isfinite(atom.get(axis, math.nan)) for axis in ("x", "y", "z"))
+        for atom in atoms
+    ):
+        raise ValueError(f"{name}: coordinates are incomplete")
+    if any(not (0 <= bond["a"] < len(atoms) and 0 <= bond["b"] < len(atoms) and bond["a"] != bond["b"]) for bond in bonds):
+        raise ValueError(f"{name}: bond indices are invalid")
+    if not allow_planar and spatial_shape_ratio(atoms) <= 1e-12:
+        raise ValueError(f"{name}: rejected a planar coordinate set for a non-planar candidate")
+
+
+def atomic_write_bundle(molecules: dict) -> None:
+    OUTPUT.parent.mkdir(exist_ok=True)
+    temporary = OUTPUT.with_name(f".{OUTPUT.name}.tmp")
+    temporary.write_text(
+        json.dumps({"version": BUNDLE_VERSION, "molecules": molecules}, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    temporary.replace(OUTPUT)
+
+
+def verify_bundle() -> dict:
+    bundle = json.loads(OUTPUT.read_text(encoding="utf-8"))
+    if bundle.get("version") != BUNDLE_VERSION:
+        raise ValueError(f"Expected bundle version {BUNDLE_VERSION}, received {bundle.get('version')}")
+    molecules = bundle.get("molecules", {})
+    expected = {normalized(name): (cid, allow_planar) for name, cid, allow_planar in DEFAULT_COMPOUNDS}
+    if set(molecules) != set(expected):
+        missing = ", ".join(sorted(set(expected) - set(molecules)))
+        extra = ", ".join(sorted(set(molecules) - set(expected)))
+        raise ValueError(f"Bundle must contain exactly the default candidates (missing: {missing or 'none'}; extra: {extra or 'none'})")
+    for key, (cid, allow_planar) in expected.items():
+        molecule = molecules[key]
+        if molecule.get("cid") != cid:
+            raise ValueError(f"{molecule.get('name', key)}: expected CID {cid}, received {molecule.get('cid')}")
+        validate_molecule(molecule.get("name", key), molecule, allow_planar)
+    return molecules
 
 
 def main() -> None:
-    selected_names = set(DEFAULT_NAMES + list(CID_ONLY))
-    if len(sys.argv) > 1:
-        selected_names = {name for name in sys.argv[1:]}
-    if OUTPUT.exists():
+    if sys.argv[1:] == ["--verify"]:
+        molecules = verify_bundle()
+        print(f"Verified {OUTPUT.relative_to(ROOT)} with {len(molecules)} molecules.")
+        return
+
+    requested = {normalized(name) for name in sys.argv[1:]}
+    known = {normalized(name) for name, _, _ in DEFAULT_COMPOUNDS}
+    if requested and not requested <= known:
+        unknown = ", ".join(sorted(requested - known))
+        raise SystemExit(f"Unknown default compound: {unknown}")
+
+    if requested and OUTPUT.exists():
         molecules = json.loads(OUTPUT.read_text(encoding="utf-8")).get("molecules", {})
     else:
         molecules = {}
 
-    def save() -> None:
-        OUTPUT.parent.mkdir(exist_ok=True)
-        OUTPUT.write_text(json.dumps({"version": 1, "molecules": molecules}, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    selected = [entry for entry in DEFAULT_COMPOUNDS if not requested or normalized(entry[0]) in requested]
+    for index, (name, cid, allow_planar) in enumerate(selected):
+        print(f"PubChem 3D: {name} (CID {cid})", flush=True)
+        molecule = parse_pubchem_3d(get_pubchem_3d(cid), cid)
+        validate_molecule(name, molecule, allow_planar)
+        molecules[normalized(name)] = {"name": name, "cid": cid, **molecule}
+        if index < len(selected) - 1:
+            time.sleep(PUBCHEM_REQUEST_INTERVAL_SECONDS)
 
-    for name in DEFAULT_NAMES:
-        if name not in selected_names:
-            continue
-        print(f"CIR: {name}", flush=True)
-        try:
-            molecule = cir_molecule(name)
-        except Exception as error:
-            print(f"  CIR unavailable ({error}); trying PubChem JSON", flush=True)
-            molecule = pubchem_molecule("name", name)
-            time.sleep(1.1)
-        molecules[normalized(name)] = {"name": name, **molecule}
-        save()
-        time.sleep(0.35)
-    for name, cid in CID_ONLY.items():
-        if name not in selected_names:
-            continue
-        print(f"PubChem CID: {name}", flush=True)
-        molecules[normalized(name)] = {"name": name, "cid": cid, **pubchem_molecule("cid", cid)}
-        save()
-    print(f"Wrote {OUTPUT.relative_to(ROOT)} with {len(molecules)} molecules.")
+    atomic_write_bundle(molecules)
+    verified = verify_bundle()
+    print(f"Wrote and verified {OUTPUT.relative_to(ROOT)} with {len(verified)} molecules.")
 
 
 if __name__ == "__main__":
