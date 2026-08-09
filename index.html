@@ -986,6 +986,8 @@
         const ssRotateAxis = new THREE.Vector3();
         const ssRotateAxisGuide = new THREE.Vector3();
         const ssRotateAxisTarget = new THREE.Vector3();
+        const ssMajorAxisStart = new THREE.Vector3();
+        const ssMajorAxisTarget = new THREE.Vector3();
         const ssCameraAxis = new THREE.Vector3();
         const ssWorldAxis = new THREE.Vector3();
         const ssMixedAxis = new THREE.Vector3();
@@ -998,6 +1000,10 @@
         const ssMotionUp = new THREE.Vector3();
         let ssAxisTargetChangeAt = 0;
         let ssMajorAxisChangeAt = 0;
+        let ssMajorAxisActive = false;
+        let ssMajorAxisStartTime = 0;
+        let ssMajorAxisDuration = 14;
+        let ssMajorAxisSettleUntil = 0;
         let ssAxisGuideFollowRate = 0.45;
         let ssAxisFollowRate = 0.25;
         let ssAxisBlend = 0.5;
@@ -1022,6 +1028,11 @@
 
         function randomRange(min, max) {
             return min + Math.random() * (max - min);
+        }
+
+        function smootherStep01(value) {
+            const t = THREE.MathUtils.clamp(value, 0, 1);
+            return t * t * t * (t * (t * 6 - 15) + 10);
         }
 
         function slerpUnitVector(out, from, to, alpha) {
@@ -1064,6 +1075,16 @@
                 .normalize();
         }
 
+        function beginSSMajorAxisTurn() {
+            ssMajorAxisStart.copy(ssRotateAxisGuide);
+            pickNextSSRotateAxisTarget(true);
+            ssMajorAxisTarget.copy(ssRotateAxisTarget);
+            ssMajorAxisActive = true;
+            ssMajorAxisStartTime = ssRotateClockTime;
+            ssMajorAxisDuration = randomRange(12, 16);
+            ssAxisTargetChangeAt = Infinity;
+        }
+
         function initSSRotateState() {
             ssRotateClockTime = 0;
             randomUnitVector3(ssRotateAxis);
@@ -1072,6 +1093,10 @@
 
             ssAxisTargetChangeAt = randomRange(3, 7);
             ssMajorAxisChangeAt = randomRange(15, 20);
+            ssMajorAxisActive = false;
+            ssMajorAxisStartTime = 0;
+            ssMajorAxisDuration = 14;
+            ssMajorAxisSettleUntil = 0;
             ssAxisGuideFollowRate = randomRange(0.35, 0.55);
             ssAxisFollowRate = randomRange(0.18, 0.32);
             ssAxisBlend = randomRange(0.35, 0.65);
@@ -2136,30 +2161,60 @@
                 if (ssActive) {
                     ssRotateClockTime += delta;
 
-                    if (ssRotateClockTime >= ssAxisTargetChangeAt) {
+                    if (!ssMajorAxisActive
+                        && ssRotateClockTime >= ssMajorAxisSettleUntil
+                        && ssRotateClockTime >= ssAxisTargetChangeAt) {
                         const isMajorTurn = ssRotateClockTime >= ssMajorAxisChangeAt;
-                        pickNextSSRotateAxisTarget(isMajorTurn);
-                        ssAxisTargetChangeAt = ssRotateClockTime + randomRange(3, 7);
-                        ssAxisGuideFollowRate = randomRange(0.35, 0.55);
-                        ssAxisFollowRate = randomRange(0.18, 0.32);
-                        if (isMajorTurn) ssMajorAxisChangeAt = ssRotateClockTime + randomRange(15, 20);
+                        if (isMajorTurn) {
+                            beginSSMajorAxisTurn();
+                        } else {
+                            pickNextSSRotateAxisTarget(false);
+                            ssAxisTargetChangeAt = ssRotateClockTime + randomRange(3, 7);
+                            ssAxisGuideFollowRate = randomRange(0.35, 0.55);
+                            ssAxisFollowRate = randomRange(0.18, 0.32);
+                        }
                     }
-                    if (ssRotateClockTime >= ssAxisBlendChangeAt) {
+                    if (!ssMajorAxisActive
+                        && ssRotateClockTime >= ssMajorAxisSettleUntil
+                        && ssRotateClockTime >= ssAxisBlendChangeAt) {
                         ssAxisBlendTarget = randomRange(0.20, 0.80);
                         ssAxisBlendChangeAt = ssRotateClockTime + randomRange(6, 15);
                         ssAxisBlendFollowRate = randomRange(0.18, 0.35);
                     }
-                    if (ssRotateClockTime >= ssAxisRandomWeightChangeAt) {
+                    if (!ssMajorAxisActive
+                        && ssRotateClockTime >= ssMajorAxisSettleUntil
+                        && ssRotateClockTime >= ssAxisRandomWeightChangeAt) {
                         ssAxisRandomWeightTarget = randomRange(0.45, 0.65);
                         ssAxisRandomWeightChangeAt = ssRotateClockTime + randomRange(5, 10);
                         ssAxisRandomWeightFollowRate = randomRange(0.18, 0.32);
                     }
 
-                    const guideFollow = 1 - Math.exp(-ssAxisGuideFollowRate * delta);
+                    if (ssMajorAxisActive) {
+                        const progress = (ssRotateClockTime - ssMajorAxisStartTime) / ssMajorAxisDuration;
+                        slerpUnitVector(
+                            ssRotateAxisGuide,
+                            ssMajorAxisStart,
+                            ssMajorAxisTarget,
+                            smootherStep01(progress)
+                        );
+                        if (progress >= 1) {
+                            ssMajorAxisActive = false;
+                            ssRotateAxisGuide.copy(ssMajorAxisTarget);
+                            ssRotateAxisTarget.copy(ssMajorAxisTarget);
+                            ssMajorAxisSettleUntil = ssRotateClockTime + randomRange(2, 4);
+                            ssAxisTargetChangeAt = ssMajorAxisSettleUntil;
+                            ssMajorAxisChangeAt = ssMajorAxisSettleUntil + randomRange(10, 16);
+                            ssAxisBlendChangeAt = ssMajorAxisSettleUntil + randomRange(6, 15);
+                            ssAxisRandomWeightChangeAt = ssMajorAxisSettleUntil + randomRange(5, 10);
+                        }
+                    } else {
+                        const guideFollow = 1 - Math.exp(-ssAxisGuideFollowRate * delta);
+                        slerpUnitVector(ssRotateAxisGuide, ssRotateAxisGuide, ssRotateAxisTarget, guideFollow);
+                    }
+
                     const axisFollow = 1 - Math.exp(-ssAxisFollowRate * delta);
                     const blendFollow = 1 - Math.exp(-ssAxisBlendFollowRate * delta);
                     const randomWeightFollow = 1 - Math.exp(-ssAxisRandomWeightFollowRate * delta);
-                    slerpUnitVector(ssRotateAxisGuide, ssRotateAxisGuide, ssRotateAxisTarget, guideFollow);
                     slerpUnitVector(ssRotateAxis, ssRotateAxis, ssRotateAxisGuide, axisFollow);
                     ssAxisBlend += (ssAxisBlendTarget - ssAxisBlend) * blendFollow;
                     ssAxisRandomWeight += (ssAxisRandomWeightTarget - ssAxisRandomWeight) * randomWeightFollow;
