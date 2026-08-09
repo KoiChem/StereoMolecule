@@ -711,7 +711,7 @@
             </div>
 
             <div class="ss-row">
-                <label>回転速度 (度/秒)</label>
+                <label>基準回転速度 (度/秒)</label>
                 <input type="number" id="ss-speed" style="width:60px; background:rgba(255,255,255,0.1); border:none; color:#fff; border-radius:8px; padding:4px 8px; text-align:center; font-size:13px; outline:none;">
             </div>
             
@@ -867,8 +867,12 @@
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(BG_COLORS[currentBgMode]);
 
+        // 分子本体の回転と、スクリーンセーバー中の穏やかな位置漂いを分離する。
+        // 親グループは平行移動だけなので、既存の回転軸ロジックには影響しない。
+        const moleculeMotionGroup = new THREE.Group();
         const moleculeGroup = new THREE.Group();
-        scene.add(moleculeGroup);
+        moleculeMotionGroup.add(moleculeGroup);
+        scene.add(moleculeMotionGroup);
 
         const mainCamera = new THREE.PerspectiveCamera(45, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
         mainCamera.position.set(0, 0, 15);
@@ -986,6 +990,25 @@
         const ssMixedAxis = new THREE.Vector3();
         const ssFinalAxis = new THREE.Vector3();
         const ssTmpVec = new THREE.Vector3();
+        const ssAxisPerp = new THREE.Vector3();
+        const ssAxisRandomHelper = new THREE.Vector3();
+        const ssMotionRight = new THREE.Vector3();
+        const ssMotionUp = new THREE.Vector3();
+        let ssAxisTargetChangeAt = 0;
+        let ssAxisFollowRate = 0.42;
+        let ssAxisBlend = 0.5;
+        let ssAxisBlendTarget = 0.5;
+        let ssAxisBlendChangeAt = 0;
+        let ssAxisBlendFollowRate = 0.24;
+        let ssAxisRandomWeight = 0.36;
+        let ssAxisRandomWeightTarget = 0.36;
+        let ssAxisRandomWeightChangeAt = 0;
+        let ssAxisRandomWeightFollowRate = 0.3;
+        let ssSpeedPhaseA = 0;
+        let ssSpeedPhaseB = 0;
+        let ssModelMotionClockTime = 0;
+        let ssModelMotionPhaseX = 0;
+        let ssModelMotionPhaseY = 0;
 
         function randomUnitVector3(v) {
             v.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
@@ -993,10 +1016,53 @@
             v.normalize();
         }
 
+        function randomRange(min, max) {
+            return min + Math.random() * (max - min);
+        }
+
+        // 今の向きの近くを次の目標にする。反対向きへの急な補間を避けつつ、
+        // ときどき大きく曲がることでランダム感を保つ。
+        function pickNextSSRotateAxisTarget() {
+            randomUnitVector3(ssAxisRandomHelper);
+            ssAxisPerp.copy(ssAxisRandomHelper)
+                .addScaledVector(ssRotateAxis, -ssAxisRandomHelper.dot(ssRotateAxis));
+            if (ssAxisPerp.lengthSq() < 1e-6) {
+                ssAxisPerp.set(1, 0, 0).cross(ssRotateAxis);
+                if (ssAxisPerp.lengthSq() < 1e-6) ssAxisPerp.set(0, 1, 0).cross(ssRotateAxis);
+            }
+            ssAxisPerp.normalize();
+
+            const turnDegrees = Math.random() < 0.16
+                ? randomRange(70, 100)
+                : randomRange(25, 65);
+            const turnRadians = THREE.MathUtils.degToRad(turnDegrees);
+            ssRotateAxisTarget.copy(ssRotateAxis)
+                .multiplyScalar(Math.cos(turnRadians))
+                .addScaledVector(ssAxisPerp, Math.sin(turnRadians))
+                .normalize();
+        }
+
         function initSSRotateState() {
-            ssRotateClockTime = Math.random() * Math.PI * 2;
+            ssRotateClockTime = 0;
             randomUnitVector3(ssRotateAxis);
-            randomUnitVector3(ssRotateAxisTarget);
+            pickNextSSRotateAxisTarget();
+
+            ssAxisTargetChangeAt = randomRange(3, 9);
+            ssAxisFollowRate = randomRange(0.30, 0.58);
+            ssAxisBlend = randomRange(0.35, 0.65);
+            ssAxisBlendTarget = randomRange(0.20, 0.80);
+            ssAxisBlendChangeAt = randomRange(6, 15);
+            ssAxisBlendFollowRate = randomRange(0.18, 0.35);
+            ssAxisRandomWeight = randomRange(0.30, 0.40);
+            ssAxisRandomWeightTarget = randomRange(0.30, 0.45);
+            ssAxisRandomWeightChangeAt = randomRange(5, 12);
+            ssAxisRandomWeightFollowRate = randomRange(0.22, 0.38);
+
+            ssSpeedPhaseA = Math.random() * Math.PI * 2;
+            ssSpeedPhaseB = Math.random() * Math.PI * 2;
+            ssModelMotionClockTime = 0;
+            ssModelMotionPhaseX = Math.random() * Math.PI * 2;
+            ssModelMotionPhaseY = Math.random() * Math.PI * 2;
         }
 
         const SS_VALS = {
@@ -1042,6 +1108,7 @@
                 labelText: document.getElementById('label-left').textContent,
                 cameraPosition: mainCamera.position.clone(),
                 groupQuaternion: moleculeGroup.quaternion.clone(),
+                motionPosition: moleculeMotionGroup.position.clone(),
                 offsetX: offsetX,
                 offsetY: offsetY
             };
@@ -1050,6 +1117,7 @@
             currentRotateSpeed = ssSettings.speed;
             offsetX = 0;
             offsetY = 0;
+            moleculeMotionGroup.position.set(0, 0, 0);
             moleculeGroup.rotation.set(0, 0, 0);
             controls.target.set(0, 0, 0);
             mainCamera.position.set(0, 0, 15);
@@ -1165,6 +1233,7 @@
 
             mainCamera.position.copy(previousState.cameraPosition);
             moleculeGroup.quaternion.copy(previousState.groupQuaternion);
+            moleculeMotionGroup.position.copy(previousState.motionPosition);
             offsetX = previousState.offsetX;
             offsetY = previousState.offsetY;
 
@@ -1705,6 +1774,44 @@
             updateNameSpritePlacement();
         }
 
+        function getSSSpeedMultiplier() {
+            // 合計の絶対値が1を超えないため、常に基準速度の92〜108%に収まる。
+            const wave = Math.sin(ssRotateClockTime * 0.22 + ssSpeedPhaseA) * 0.70
+                + Math.sin(ssRotateClockTime * 0.51 + ssSpeedPhaseB) * 0.30;
+            return 1 + wave * 0.08;
+        }
+
+        function updateSSModelMotion(delta) {
+            if (!ssActive || !currentMoleculeRadius) return;
+
+            ssModelMotionClockTime += delta;
+            const t = ssModelMotionClockTime;
+            const rawX = Math.sin(t * 0.83 + ssModelMotionPhaseX) * 0.72
+                + Math.sin(t * 1.43 + ssModelMotionPhaseY) * 0.28;
+            const rawY = Math.sin(t * 0.71 + ssModelMotionPhaseY) * 0.70
+                + Math.cos(t * 1.31 + ssModelMotionPhaseX) * 0.30;
+
+            const cameraDistance = mainCamera.position.distanceTo(controls.target);
+            const halfVisibleHeight = Math.tan(THREE.MathUtils.degToRad(mainCamera.fov / 2)) * cameraDistance;
+            const halfVisibleWidth = halfVisibleHeight * getCurrentEyeAspect();
+            const eyeWidth = currentStereoIndex === 2 ? window.innerWidth : window.innerWidth / 2;
+            const safetyNdc = 0.045;
+            const availableNdcX = Math.max(0, 1 - (currentMoleculeRadius / halfVisibleWidth)
+                - Math.abs(offsetX / Math.max(eyeWidth, 1)) - safetyNdc);
+            const availableNdcY = Math.max(0, 1 - (currentMoleculeRadius / halfVisibleHeight)
+                - Math.abs(offsetY / Math.max(window.innerHeight, 1)) - safetyNdc);
+            const maxOffsetX = availableNdcX * halfVisibleWidth;
+            const maxOffsetY = availableNdcY * halfVisibleHeight;
+            const amplitudeX = Math.min(currentMoleculeRadius * 0.030, maxOffsetX * 0.65);
+            const amplitudeY = Math.min(currentMoleculeRadius * 0.035, maxOffsetY * 0.65);
+
+            ssMotionRight.set(1, 0, 0).applyQuaternion(mainCamera.quaternion).normalize();
+            ssMotionUp.set(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
+            moleculeMotionGroup.position.copy(controls.target)
+                .addScaledVector(ssMotionRight, rawX * amplitudeX)
+                .addScaledVector(ssMotionUp, rawY * amplitudeY);
+        }
+
         function buildMoleculeGeometry(data, keepOffset = false) {
             moleculeSceneObjects.forEach(obj => {
                 moleculeGroup.remove(obj);
@@ -2001,30 +2108,50 @@
             controls.update();
 
             if (isAutoRotating) {
-                const angle = THREE.MathUtils.degToRad(currentRotateSpeed) * delta;
-
                 if (ssActive) {
                     ssRotateClockTime += delta;
+
+                    if (ssRotateClockTime >= ssAxisTargetChangeAt) {
+                        pickNextSSRotateAxisTarget();
+                        ssAxisTargetChangeAt = ssRotateClockTime + randomRange(3, 9);
+                        ssAxisFollowRate = randomRange(0.30, 0.58);
+                    }
+                    if (ssRotateClockTime >= ssAxisBlendChangeAt) {
+                        ssAxisBlendTarget = randomRange(0.20, 0.80);
+                        ssAxisBlendChangeAt = ssRotateClockTime + randomRange(6, 15);
+                        ssAxisBlendFollowRate = randomRange(0.18, 0.35);
+                    }
+                    if (ssRotateClockTime >= ssAxisRandomWeightChangeAt) {
+                        ssAxisRandomWeightTarget = randomRange(0.30, 0.45);
+                        ssAxisRandomWeightChangeAt = ssRotateClockTime + randomRange(5, 12);
+                        ssAxisRandomWeightFollowRate = randomRange(0.22, 0.38);
+                    }
+
+                    const axisFollow = 1 - Math.exp(-ssAxisFollowRate * delta);
+                    const blendFollow = 1 - Math.exp(-ssAxisBlendFollowRate * delta);
+                    const randomWeightFollow = 1 - Math.exp(-ssAxisRandomWeightFollowRate * delta);
+                    ssRotateAxis.lerp(ssRotateAxisTarget, axisFollow).normalize();
+                    ssAxisBlend += (ssAxisBlendTarget - ssAxisBlend) * blendFollow;
+                    ssAxisRandomWeight += (ssAxisRandomWeightTarget - ssAxisRandomWeight) * randomWeightFollow;
 
                     ssCameraAxis.set(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
                     ssTmpVec.set(1, 0, 0).applyQuaternion(mainCamera.quaternion).normalize();
                     ssCameraAxis.addScaledVector(ssTmpVec, 0.35).normalize();
-
                     ssWorldAxis.set(0.35, 1, 0).normalize();
+                    ssMixedAxis.copy(ssCameraAxis).multiplyScalar(ssAxisBlend)
+                        .addScaledVector(ssWorldAxis, 1 - ssAxisBlend).normalize();
 
-                    const blendW = 0.5 + 0.5 * Math.sin(ssRotateClockTime * 0.28);
-                    ssMixedAxis.copy(ssCameraAxis).multiplyScalar(blendW).addScaledVector(ssWorldAxis, 1 - blendW).normalize();
-
-                    if (Math.random() < delta * 0.12) randomUnitVector3(ssRotateAxisTarget);
-                    ssRotateAxis.lerp(ssRotateAxisTarget, Math.min(1, delta * 0.4)).normalize();
-
-                    ssFinalAxis.copy(ssMixedAxis).lerp(ssRotateAxis, 0.2).normalize();
+                    const angle = THREE.MathUtils.degToRad(currentRotateSpeed * getSSSpeedMultiplier()) * delta;
+                    ssFinalAxis.copy(ssMixedAxis).lerp(ssRotateAxis, ssAxisRandomWeight).normalize();
                     moleculeGroup.rotateOnWorldAxis(ssFinalAxis, angle);
                 } else {
+                    const angle = THREE.MathUtils.degToRad(currentRotateSpeed) * delta;
                     const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
                     moleculeGroup.rotateOnWorldAxis(cameraUp, angle * rotateDirection);
                 }
             }
+
+            if (ssActive) updateSSModelMotion(delta);
 
             if (nameSprite) {
                 nameClockTime += delta;
