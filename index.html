@@ -831,6 +831,7 @@
         const SS_FADE_IN_MS = 800;
         const SS_CROSSFADE_MS = 2000;
         const SS_CROSSFADE_MSAA_SAMPLES = 4;
+        const SS_CROSSFADE_DEPTH_PADDING = 1.5;
 
         const BG_COLORS = {
             'white': 0xffffff,
@@ -1193,6 +1194,12 @@
                 sdfData: window.currentSdfData,
                 labelText: document.getElementById('label-left').textContent,
                 cameraPosition: mainCamera.position.clone(),
+                mainCameraNear: mainCamera.near,
+                mainCameraFar: mainCamera.far,
+                cameraLNear: cameraL.near,
+                cameraLFar: cameraL.far,
+                cameraRNear: cameraR.near,
+                cameraRFar: cameraR.far,
                 groupQuaternion: moleculeGroup.quaternion.clone(),
                 motionPosition: moleculeMotionGroup.position.clone(),
                 offsetX: offsetX,
@@ -1307,6 +1314,8 @@
             ssOutgoingVisualState = {
                 bg: currentBgMode,
                 stereo: currentStereoIndex,
+                radius: currentMoleculeRadius,
+                target: controls.target.clone(),
                 mainCamera: mainCamera.clone(),
                 cameraL: cameraL.clone(),
                 cameraR: cameraR.clone()
@@ -1341,7 +1350,8 @@
             const targetHeight = Math.max(1, Math.round(height * pixelRatio));
             if (!ssCrossfadeRenderTarget) {
                 // 通常の画面は antialias: true だが、画面外バッファは別設定になる。
-                // WebGL 2 では旧表示だけをMSAA化し、空間充填モデルの輪郭を保つ。
+                // 深度＋ステンシルを明示して24bit深度を使い、交差する空間充填球の
+                // 手前/奥の判定が16bit深度で揺れるのを避ける。
                 const maxSamples = renderer.capabilities.maxSamples || 0;
                 const canUseMSAA = renderer.capabilities.isWebGL2
                     && typeof THREE.WebGLMultisampleRenderTarget === 'function'
@@ -1354,7 +1364,7 @@
                     magFilter: THREE.LinearFilter,
                     format: THREE.RGBAFormat,
                     depthBuffer: true,
-                    stencilBuffer: false
+                    stencilBuffer: true
                 });
                 if (canUseMSAA) {
                     ssCrossfadeRenderTarget.samples = Math.min(SS_CROSSFADE_MSAA_SAMPLES, maxSamples);
@@ -1366,6 +1376,29 @@
             ssCrossfadeOverlayMaterial.map = ssCrossfadeRenderTarget.texture;
             ssCrossfadeOverlayMaterial.needsUpdate = true;
             return ssCrossfadeRenderTarget;
+        }
+
+        // iOS Safariでのクロスフェードは、画面外バッファの深度精度が十分なWebGL 2に限定する。
+        // それ以外は下の通常フェードへ進み、壊れた中間フレームを表示しない。
+        function canUseSSCrossfade() {
+            return renderer.capabilities.isWebGL2;
+        }
+
+        function setSSCameraDepthRange(camera, radius, target = controls.target) {
+            const safeRadius = Math.max(radius || currentMoleculeRadius || 1, 0.25);
+            const distance = camera.position.distanceTo(target);
+            const padding = Math.max(SS_CROSSFADE_DEPTH_PADDING, safeRadius * 0.7);
+            camera.near = Math.max(0.05, distance - safeRadius - padding);
+            camera.far = Math.max(camera.near + 1, distance + safeRadius + padding);
+            camera.updateProjectionMatrix();
+        }
+
+        function updateSSCameraDepthRanges() {
+            if (!ssActive) return;
+            setSSCameraDepthRange(mainCamera, currentMoleculeRadius);
+            updateStereoCameras();
+            setSSCameraDepthRange(cameraL, currentMoleculeRadius);
+            setSSCameraDepthRange(cameraR, currentMoleculeRadius);
         }
 
         function setSSCameraViewport(camera, aspect, projectionOffsetX = 0, projectionOffsetY = 0) {
@@ -1396,6 +1429,11 @@
             const outgoingNameVisible = ssOutgoingNameSprite ? ssOutgoingNameSprite.visible : false;
             const currentBackground = scene.background.getHex();
             const oldVisual = ssOutgoingVisualState;
+
+            // 旧分子もカメラに合った狭い深度範囲でレンダーする。
+            setSSCameraDepthRange(oldVisual.mainCamera, oldVisual.radius, oldVisual.target);
+            setSSCameraDepthRange(oldVisual.cameraL, oldVisual.radius, oldVisual.target);
+            setSSCameraDepthRange(oldVisual.cameraR, oldVisual.radius, oldVisual.target);
 
             moleculeGroup.visible = false;
             ssOutgoingMoleculeGroup.visible = true;
@@ -1544,7 +1582,7 @@
             cancelSSTransition(true);
             const transitionId = ssTransitionId;
 
-            if (ssSettings.transition === 'cross' && prepareSSOutgoingMolecule()) {
+            if (ssSettings.transition === 'cross' && canUseSSCrossfade() && prepareSSOutgoingMolecule()) {
                 // 新しい構造の生成・名前フォント待ちの間も、最初の1フレームから旧表示で覆う。
                 ssCrossfadeOutgoingOpacity = 1;
                 ssCrossfadeOverlayMaterial.opacity = 1;
@@ -1635,6 +1673,15 @@
             if (window.currentSdfData) buildMoleculeGeometry(window.currentSdfData, true);
 
             mainCamera.position.copy(previousState.cameraPosition);
+            mainCamera.near = previousState.mainCameraNear;
+            mainCamera.far = previousState.mainCameraFar;
+            mainCamera.updateProjectionMatrix();
+            cameraL.near = previousState.cameraLNear;
+            cameraL.far = previousState.cameraLFar;
+            cameraL.updateProjectionMatrix();
+            cameraR.near = previousState.cameraRNear;
+            cameraR.far = previousState.cameraRFar;
+            cameraR.updateProjectionMatrix();
             moleculeGroup.quaternion.copy(previousState.groupQuaternion);
             moleculeMotionGroup.position.copy(previousState.motionPosition);
             offsetX = previousState.offsetX;
@@ -2175,6 +2222,7 @@
             offsetY = 0;
             const direction = new THREE.Vector3().subVectors(mainCamera.position, controls.target).normalize();
             mainCamera.position.copy(controls.target).add(direction.multiplyScalar(getFittedCameraDistance(currentMoleculeRadius)));
+            updateSSCameraDepthRanges();
             updateNameSpritePlacement();
         }
 
@@ -2391,6 +2439,7 @@
                 
                 const dir = new THREE.Vector3().subVectors(mainCamera.position, controls.target).normalize();
                 mainCamera.position.copy(controls.target).add(dir.multiplyScalar(getFittedCameraDistance(maxDistance)));
+                updateSSCameraDepthRanges();
             }
         }
 
