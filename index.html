@@ -830,6 +830,7 @@
         const SS_FADE_OUT_MS = 600;
         const SS_FADE_IN_MS = 800;
         const SS_CROSSFADE_MS = 2000;
+        const SS_CROSSFADE_MSAA_SAMPLES = 4;
 
         const BG_COLORS = {
             'white': 0xffffff,
@@ -1339,13 +1340,25 @@
             const targetWidth = Math.max(1, Math.round(width * pixelRatio));
             const targetHeight = Math.max(1, Math.round(height * pixelRatio));
             if (!ssCrossfadeRenderTarget) {
-                ssCrossfadeRenderTarget = new THREE.WebGLRenderTarget(targetWidth, targetHeight, {
+                // 通常の画面は antialias: true だが、画面外バッファは別設定になる。
+                // WebGL 2 では旧表示だけをMSAA化し、空間充填モデルの輪郭を保つ。
+                const maxSamples = renderer.capabilities.maxSamples || 0;
+                const canUseMSAA = renderer.capabilities.isWebGL2
+                    && typeof THREE.WebGLMultisampleRenderTarget === 'function'
+                    && maxSamples >= 2;
+                const RenderTargetClass = canUseMSAA
+                    ? THREE.WebGLMultisampleRenderTarget
+                    : THREE.WebGLRenderTarget;
+                ssCrossfadeRenderTarget = new RenderTargetClass(targetWidth, targetHeight, {
                     minFilter: THREE.LinearFilter,
                     magFilter: THREE.LinearFilter,
                     format: THREE.RGBAFormat,
                     depthBuffer: true,
                     stencilBuffer: false
                 });
+                if (canUseMSAA) {
+                    ssCrossfadeRenderTarget.samples = Math.min(SS_CROSSFADE_MSAA_SAMPLES, maxSamples);
+                }
                 ssCrossfadeRenderTarget.texture.generateMipmaps = false;
             } else if (ssCrossfadeRenderTarget.width !== targetWidth || ssCrossfadeRenderTarget.height !== targetHeight) {
                 ssCrossfadeRenderTarget.setSize(targetWidth, targetHeight);
@@ -1491,8 +1504,8 @@
                     }
 
                     const progress = Math.min(1, (now - startTime) / duration);
-                    // 冒頭は旧表示を保ち、途中から均等に重ねることで新表示の早すぎる出現を防ぐ。
-                    const eased = smootherStep01(THREE.MathUtils.clamp((progress - 0.10) / 0.80, 0, 1));
+                    // 冒頭0.1秒だけ旧表示を保ち、残り1.8秒で自然に重ねる。
+                    const eased = smootherStep01(THREE.MathUtils.clamp((progress - 0.05) / 0.90, 0, 1));
                     ssCrossfadeOutgoingOpacity = 1 - eased;
                     setSSLabelOpacity(eased);
 
