@@ -829,7 +829,7 @@
         const MOLECULE_FETCH_TIMEOUT_MS = 12000;
         const SS_FADE_OUT_MS = 600;
         const SS_FADE_IN_MS = 800;
-        const SS_CROSSFADE_MS = 1200;
+        const SS_CROSSFADE_MS = 1400;
 
         const BG_COLORS = {
             'white': 0xffffff,
@@ -869,7 +869,9 @@
         let wakeLock = null;
         let moleculeSceneObjects = [];
         let ssOutgoingSceneObjects = [];
-        let ssOutgoingMaterialStates = [];
+        let ssOutgoingNameSprite = null;
+        let ssOutgoingVisualState = null;
+        let ssCrossfadeOutgoingOpacity = 0;
         let offsetX = 0;
         let offsetY = 0;
 
@@ -900,6 +902,20 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.autoClear = false;
         container.appendChild(renderer.domElement);
+
+        // CROSS はメッシュごとの半透明化ではなく、旧画面を新画面の上へ合成する。
+        // これにより原子や結合が互いの深度判定で不自然に隠れず、両方を動かし続けられる。
+        let ssCrossfadeRenderTarget = null;
+        const ssCrossfadeOverlayScene = new THREE.Scene();
+        const ssCrossfadeOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const ssCrossfadeOverlayMaterial = new THREE.MeshBasicMaterial({
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
+            opacity: 0
+        });
+        const ssCrossfadeOverlay = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), ssCrossfadeOverlayMaterial);
+        ssCrossfadeOverlayScene.add(ssCrossfadeOverlay);
 
         let controls;
         try {
@@ -1266,42 +1282,151 @@
                 ssOutgoingMoleculeGroup.remove(obj);
                 if (obj.geometry) obj.geometry.dispose();
                 if (obj.material) obj.material.dispose();
-                obj.renderOrder = 0;
             });
             ssOutgoingSceneObjects = [];
-            ssOutgoingMaterialStates = [];
+            if (ssOutgoingNameSprite) {
+                scene.remove(ssOutgoingNameSprite);
+                if (ssOutgoingNameSprite.geometry) ssOutgoingNameSprite.geometry.dispose();
+                if (ssOutgoingNameSprite.material.map) ssOutgoingNameSprite.material.map.dispose();
+                ssOutgoingNameSprite.material.dispose();
+                ssOutgoingNameSprite = null;
+            }
+            ssOutgoingVisualState = null;
+            ssCrossfadeOutgoingOpacity = 0;
+            ssCrossfadeOverlayMaterial.opacity = 0;
             ssOutgoingMoleculeGroup.rotation.set(0, 0, 0);
+            ssOutgoingMoleculeGroup.visible = true;
         }
 
         function prepareSSOutgoingMolecule() {
             clearSSOutgoingMolecule();
             if (moleculeSceneObjects.length === 0) return false;
 
-            const originalMaterials = new Set();
+            // 旧表示のカメラ・背景・立体視設定を保ち、切替中も独立して描画する。
+            ssOutgoingVisualState = {
+                bg: currentBgMode,
+                stereo: currentStereoIndex,
+                mainCamera: mainCamera.clone(),
+                cameraL: cameraL.clone(),
+                cameraR: cameraR.clone()
+            };
             ssOutgoingMoleculeGroup.quaternion.copy(moleculeGroup.quaternion);
             moleculeSceneObjects.forEach(obj => {
-                const originalMaterial = obj.material;
-                originalMaterials.add(originalMaterial);
-                const outgoingMaterial = originalMaterial.clone();
-                const baseOpacity = typeof outgoingMaterial.opacity === 'number' ? outgoingMaterial.opacity : 1;
-                outgoingMaterial.transparent = true;
-                outgoingMaterial.depthWrite = false;
-                obj.material = outgoingMaterial;
-                obj.renderOrder = 1;
                 ssOutgoingSceneObjects.push(obj);
-                ssOutgoingMaterialStates.push({ material: outgoingMaterial, baseOpacity });
                 ssOutgoingMoleculeGroup.add(obj);
             });
-            originalMaterials.forEach(material => material.dispose());
             moleculeSceneObjects = [];
+            if (nameSprite) {
+                ssOutgoingNameSprite = nameSprite;
+                nameSprite = null;
+                ssOutgoingNameSprite.visible = false;
+            }
+            // 通常描画には新表示だけを出し、旧表示は画面外レンダーの間だけ可視化する。
+            ssOutgoingMoleculeGroup.visible = false;
             return ssOutgoingSceneObjects.length > 0;
         }
 
-        function setSSOutgoingOpacity(value) {
-            const opacity = THREE.MathUtils.clamp(value, 0, 1);
-            ssOutgoingMaterialStates.forEach(({ material, baseOpacity }) => {
-                material.opacity = baseOpacity * opacity;
-            });
+        function disposeSSCrossfadeRenderTarget() {
+            if (!ssCrossfadeRenderTarget) return;
+            ssCrossfadeRenderTarget.dispose();
+            ssCrossfadeRenderTarget = null;
+            ssCrossfadeOverlayMaterial.map = null;
+            ssCrossfadeOverlayMaterial.needsUpdate = true;
+        }
+
+        function ensureSSCrossfadeRenderTarget(width, height) {
+            const pixelRatio = renderer.getPixelRatio();
+            const targetWidth = Math.max(1, Math.round(width * pixelRatio));
+            const targetHeight = Math.max(1, Math.round(height * pixelRatio));
+            if (!ssCrossfadeRenderTarget) {
+                ssCrossfadeRenderTarget = new THREE.WebGLRenderTarget(targetWidth, targetHeight, {
+                    minFilter: THREE.LinearFilter,
+                    magFilter: THREE.LinearFilter,
+                    format: THREE.RGBAFormat,
+                    depthBuffer: true,
+                    stencilBuffer: false
+                });
+                ssCrossfadeRenderTarget.texture.generateMipmaps = false;
+            } else if (ssCrossfadeRenderTarget.width !== targetWidth || ssCrossfadeRenderTarget.height !== targetHeight) {
+                ssCrossfadeRenderTarget.setSize(targetWidth, targetHeight);
+            }
+            ssCrossfadeOverlayMaterial.map = ssCrossfadeRenderTarget.texture;
+            ssCrossfadeOverlayMaterial.needsUpdate = true;
+            return ssCrossfadeRenderTarget;
+        }
+
+        function setSSCameraViewport(camera, aspect, projectionOffsetX = 0, projectionOffsetY = 0) {
+            camera.aspect = aspect;
+            camera.updateProjectionMatrix();
+            camera.projectionMatrix.elements[8] = projectionOffsetX;
+            camera.projectionMatrix.elements[9] = projectionOffsetY;
+        }
+
+        function renderSSOutgoingPass(camera, viewport) {
+            const target = ssCrossfadeRenderTarget;
+            target.viewport.set(viewport.x, viewport.y, viewport.width, viewport.height);
+            target.scissor.set(viewport.x, viewport.y, viewport.width, viewport.height);
+            target.scissorTest = true;
+            renderer.setRenderTarget(null);
+            renderer.setRenderTarget(target);
+            renderer.setScissorTest(true);
+            renderer.render(scene, camera);
+        }
+
+        function renderSSOutgoingToTarget(width, height) {
+            if (!ssOutgoingVisualState || ssOutgoingSceneObjects.length === 0) return false;
+
+            const target = ensureSSCrossfadeRenderTarget(width, height);
+            const incomingVisible = moleculeGroup.visible;
+            const outgoingVisible = ssOutgoingMoleculeGroup.visible;
+            const incomingNameVisible = nameSprite ? nameSprite.visible : false;
+            const outgoingNameVisible = ssOutgoingNameSprite ? ssOutgoingNameSprite.visible : false;
+            const currentBackground = scene.background.getHex();
+            const oldVisual = ssOutgoingVisualState;
+
+            moleculeGroup.visible = false;
+            ssOutgoingMoleculeGroup.visible = true;
+            if (nameSprite) nameSprite.visible = false;
+            if (ssOutgoingNameSprite) ssOutgoingNameSprite.visible = true;
+            scene.background.setHex(BG_COLORS[oldVisual.bg]);
+
+            target.viewport.set(0, 0, target.width, target.height);
+            target.scissor.set(0, 0, target.width, target.height);
+            target.scissorTest = false;
+            renderer.setRenderTarget(target);
+            renderer.setScissorTest(false);
+            renderer.clear();
+
+            if (oldVisual.stereo === 2) {
+                setSSCameraViewport(oldVisual.mainCamera, width / height);
+                renderSSOutgoingPass(oldVisual.mainCamera, { x: 0, y: 0, width: target.width, height: target.height });
+            } else {
+                const halfTargetWidth = target.width / 2;
+                const eyeAspect = (width / 2) / height;
+                setSSCameraViewport(oldVisual.cameraL, eyeAspect);
+                setSSCameraViewport(oldVisual.cameraR, eyeAspect);
+                const leftEyeCamera = oldVisual.stereo === 1 ? oldVisual.cameraL : oldVisual.cameraR;
+                const rightEyeCamera = oldVisual.stereo === 1 ? oldVisual.cameraR : oldVisual.cameraL;
+                renderSSOutgoingPass(leftEyeCamera, { x: 0, y: 0, width: halfTargetWidth, height: target.height });
+                renderSSOutgoingPass(rightEyeCamera, { x: halfTargetWidth, y: 0, width: halfTargetWidth, height: target.height });
+            }
+
+            renderer.setRenderTarget(null);
+            moleculeGroup.visible = incomingVisible;
+            ssOutgoingMoleculeGroup.visible = outgoingVisible;
+            if (nameSprite) nameSprite.visible = incomingNameVisible;
+            if (ssOutgoingNameSprite) ssOutgoingNameSprite.visible = outgoingNameVisible;
+            scene.background.setHex(currentBackground);
+            return true;
+        }
+
+        function renderSSOutgoingOverlay(panelWidth, width, height) {
+            if (!ssCrossfadeRenderTarget || ssCrossfadeOutgoingOpacity <= 0) return;
+            ssCrossfadeOverlayMaterial.opacity = ssCrossfadeOutgoingOpacity;
+            renderer.setViewport(panelWidth, 0, width, height);
+            renderer.setScissor(panelWidth, 0, width, height);
+            renderer.setScissorTest(true);
+            renderer.render(ssCrossfadeOverlayScene, ssCrossfadeOverlayCamera);
         }
 
         function cancelSSTransition(restoreVisible = true) {
@@ -1366,8 +1491,9 @@
                     }
 
                     const progress = Math.min(1, (now - startTime) / duration);
-                    const eased = smootherStep01(progress);
-                    setSSOutgoingOpacity(1 - eased);
+                    // 冒頭は旧表示を保ち、途中から均等に重ねることで新表示の早すぎる出現を防ぐ。
+                    const eased = smootherStep01(THREE.MathUtils.clamp((progress - 0.10) / 0.80, 0, 1));
+                    ssCrossfadeOutgoingOpacity = 1 - eased;
                     setSSLabelOpacity(eased);
 
                     if (progress >= 1) {
@@ -1406,6 +1532,9 @@
             const transitionId = ssTransitionId;
 
             if (ssSettings.transition === 'cross' && prepareSSOutgoingMolecule()) {
+                // 新しい構造の生成・名前フォント待ちの間も、最初の1フレームから旧表示で覆う。
+                ssCrossfadeOutgoingOpacity = 1;
+                ssCrossfadeOverlayMaterial.opacity = 1;
                 setSSLabelOpacity(0);
                 const committed = await commitSSMolecule(
                     parsedData,
@@ -1439,6 +1568,7 @@
         function stopScreenSaver() {
             if (!ssActive) return;
             cancelSSTransition(true);
+            disposeSSCrossfadeRenderTarget();
             ssActive = false;
             clearTimeout(ssTimer);
             ssTimer = null;
@@ -2499,7 +2629,14 @@
 
             const renderWidth = window.innerWidth - panelWidth;
             const height = window.innerHeight;
+            const isCrossfadeRendering = ssActive
+                && ssOutgoingSceneObjects.length > 0
+                && ssCrossfadeOutgoingOpacity > 0
+                && ssOutgoingVisualState;
 
+            if (isCrossfadeRendering) renderSSOutgoingToTarget(renderWidth, height);
+
+            renderer.setRenderTarget(null);
             renderer.clear();
 
             if (currentStereoIndex === 2) {
@@ -2541,6 +2678,8 @@
                 renderer.setScissorTest(true);
                 renderer.render(scene, rightEyeCameraActive);
             }
+
+            if (isCrossfadeRendering) renderSSOutgoingOverlay(panelWidth, renderWidth, height);
         }
 
         // ==========================================
