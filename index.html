@@ -888,10 +888,14 @@
         // 親グループは平行移動だけなので、既存の回転軸ロジックには影響しない。
         const moleculeMotionGroup = new THREE.Group();
         const moleculeGroup = new THREE.Group();
+        // 旧分子は新分子と別の浮遊グループに置く。切替準備で新しい半径へ変わっても、
+        // 旧分子の位置が一瞬ずれないようにする。
+        const ssOutgoingMotionGroup = new THREE.Group();
         const ssOutgoingMoleculeGroup = new THREE.Group();
         moleculeMotionGroup.add(moleculeGroup);
-        moleculeMotionGroup.add(ssOutgoingMoleculeGroup);
+        ssOutgoingMotionGroup.add(ssOutgoingMoleculeGroup);
         scene.add(moleculeMotionGroup);
+        scene.add(ssOutgoingMotionGroup);
 
         const mainCamera = new THREE.PerspectiveCamera(45, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
         mainCamera.position.set(0, 0, 15);
@@ -1016,6 +1020,7 @@
         let ssTransitionId = 0;
         let ssTransitionFrame = null;
         let ssTransitionFinish = null;
+        let ssCrossfadeWarmTimer = null;
         let previousState = {};
 
         // SS用：カメラ/ワールド混合 + 軸漂い回転
@@ -1211,6 +1216,7 @@
             offsetX = 0;
             offsetY = 0;
             moleculeMotionGroup.position.set(0, 0, 0);
+            ssOutgoingMotionGroup.position.set(0, 0, 0);
             moleculeGroup.rotation.set(0, 0, 0);
             controls.target.set(0, 0, 0);
             mainCamera.position.set(0, 0, 15);
@@ -1288,8 +1294,7 @@
         function clearSSOutgoingMolecule() {
             ssOutgoingSceneObjects.forEach(obj => {
                 ssOutgoingMoleculeGroup.remove(obj);
-                if (obj.geometry) obj.geometry.dispose();
-                if (obj.material) obj.material.dispose();
+                disposeMoleculeSceneObject(obj);
             });
             ssOutgoingSceneObjects = [];
             if (ssOutgoingNameSprite) {
@@ -1304,6 +1309,7 @@
             ssCrossfadeOverlayMaterial.opacity = 0;
             ssOutgoingMoleculeGroup.rotation.set(0, 0, 0);
             ssOutgoingMoleculeGroup.visible = true;
+            ssOutgoingMotionGroup.position.set(0, 0, 0);
         }
 
         function prepareSSOutgoingMolecule() {
@@ -1321,6 +1327,7 @@
                 cameraR: cameraR.clone()
             };
             ssOutgoingMoleculeGroup.quaternion.copy(moleculeGroup.quaternion);
+            ssOutgoingMotionGroup.position.copy(moleculeMotionGroup.position);
             moleculeSceneObjects.forEach(obj => {
                 ssOutgoingSceneObjects.push(obj);
                 ssOutgoingMoleculeGroup.add(obj);
@@ -1376,6 +1383,20 @@
             ssCrossfadeOverlayMaterial.map = ssCrossfadeRenderTarget.texture;
             ssCrossfadeOverlayMaterial.needsUpdate = true;
             return ssCrossfadeRenderTarget;
+        }
+
+        // 最初の切替より前にバッファを確保する。重いGPU確保をクロスフェード開始時から外す。
+        function scheduleSSCrossfadeWarmup(delay = 180) {
+            if (ssCrossfadeWarmTimer !== null) clearTimeout(ssCrossfadeWarmTimer);
+            if (!ssActive || ssSettings.transition !== 'cross' || !canUseSSCrossfade()) return;
+            ssCrossfadeWarmTimer = setTimeout(() => {
+                ssCrossfadeWarmTimer = null;
+                if (!ssActive || ssSettings.transition !== 'cross' || !canUseSSCrossfade()) return;
+                const target = ensureSSCrossfadeRenderTarget(window.innerWidth, window.innerHeight);
+                renderer.setRenderTarget(target);
+                renderer.clear();
+                renderer.setRenderTarget(null);
+            }, delay);
         }
 
         // iOS Safariでのクロスフェードは、画面外バッファの深度精度が十分なWebGL 2に限定する。
@@ -1568,6 +1589,8 @@
             window.currentSdfData = parsedData;
             document.getElementById('label-left').textContent = labelText;
             await updateNameSprite(labelText, isCurrent);
+            // 初回表示の後に確保しておけば、次回のCROSS開始時には待たせない。
+            if (ssOutgoingSceneObjects.length === 0) scheduleSSCrossfadeWarmup();
             return isCurrent();
         }
 
@@ -1580,6 +1603,10 @@
             }
 
             cancelSSTransition(true);
+            if (ssCrossfadeWarmTimer !== null) {
+                clearTimeout(ssCrossfadeWarmTimer);
+                ssCrossfadeWarmTimer = null;
+            }
             const transitionId = ssTransitionId;
 
             if (ssSettings.transition === 'cross' && canUseSSCrossfade() && prepareSSOutgoingMolecule()) {
@@ -1619,6 +1646,10 @@
         function stopScreenSaver() {
             if (!ssActive) return;
             cancelSSTransition(true);
+            if (ssCrossfadeWarmTimer !== null) {
+                clearTimeout(ssCrossfadeWarmTimer);
+                ssCrossfadeWarmTimer = null;
+            }
             disposeSSCrossfadeRenderTarget();
             ssActive = false;
             clearTimeout(ssTimer);
@@ -2233,42 +2264,91 @@
             return 1 + wave * 0.08;
         }
 
-        function updateSSModelMotion(delta) {
-            if (!ssActive || !currentMoleculeRadius) return;
+        function getSSEyeAspect(stereoIndex) {
+            return stereoIndex === 2
+                ? window.innerWidth / Math.max(window.innerHeight, 1)
+                : (window.innerWidth / 2) / Math.max(window.innerHeight, 1);
+        }
 
-            ssModelMotionClockTime += delta;
+        function updateSSModelMotionFor(radius, stereoIndex, target, camera, output) {
             const t = ssModelMotionClockTime;
             const rawX = Math.sin(t * 0.83 + ssModelMotionPhaseX) * 0.72
                 + Math.sin(t * 1.43 + ssModelMotionPhaseY) * 0.28;
             const rawY = Math.sin(t * 0.71 + ssModelMotionPhaseY) * 0.70
                 + Math.cos(t * 1.31 + ssModelMotionPhaseX) * 0.30;
 
-            const cameraDistance = mainCamera.position.distanceTo(controls.target);
-            const halfVisibleHeight = Math.tan(THREE.MathUtils.degToRad(mainCamera.fov / 2)) * cameraDistance;
-            const halfVisibleWidth = halfVisibleHeight * getCurrentEyeAspect();
-            const eyeWidth = currentStereoIndex === 2 ? window.innerWidth : window.innerWidth / 2;
+            const safeRadius = Math.max(radius || currentMoleculeRadius || 1, 0.25);
+            const cameraDistance = camera.position.distanceTo(target);
+            const halfVisibleHeight = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * cameraDistance;
+            const halfVisibleWidth = halfVisibleHeight * getSSEyeAspect(stereoIndex);
+            const eyeWidth = stereoIndex === 2 ? window.innerWidth : window.innerWidth / 2;
             const safetyNdc = 0.045;
-            const availableNdcX = Math.max(0, 1 - (currentMoleculeRadius / halfVisibleWidth)
+            const availableNdcX = Math.max(0, 1 - (safeRadius / halfVisibleWidth)
                 - Math.abs(offsetX / Math.max(eyeWidth, 1)) - safetyNdc);
-            const availableNdcY = Math.max(0, 1 - (currentMoleculeRadius / halfVisibleHeight)
+            const availableNdcY = Math.max(0, 1 - (safeRadius / halfVisibleHeight)
                 - Math.abs(offsetY / Math.max(window.innerHeight, 1)) - safetyNdc);
             const maxOffsetX = availableNdcX * halfVisibleWidth;
             const maxOffsetY = availableNdcY * halfVisibleHeight;
-            const amplitudeX = Math.min(currentMoleculeRadius * 0.030, maxOffsetX * 0.65);
-            const amplitudeY = Math.min(currentMoleculeRadius * 0.035, maxOffsetY * 0.65);
+            const amplitudeX = Math.min(safeRadius * 0.030, maxOffsetX * 0.65);
+            const amplitudeY = Math.min(safeRadius * 0.035, maxOffsetY * 0.65);
 
-            ssMotionRight.set(1, 0, 0).applyQuaternion(mainCamera.quaternion).normalize();
-            ssMotionUp.set(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
-            moleculeMotionGroup.position.copy(controls.target)
+            ssMotionRight.set(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+            ssMotionUp.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+            output.copy(target)
                 .addScaledVector(ssMotionRight, rawX * amplitudeX)
                 .addScaledVector(ssMotionUp, rawY * amplitudeY);
+        }
+
+        function updateSSModelMotion(delta) {
+            if (!ssActive || !currentMoleculeRadius) return;
+
+            ssModelMotionClockTime += delta;
+            updateSSModelMotionFor(currentMoleculeRadius, currentStereoIndex, controls.target, mainCamera, moleculeMotionGroup.position);
+            if (ssOutgoingVisualState) {
+                updateSSModelMotionFor(
+                    ssOutgoingVisualState.radius,
+                    ssOutgoingVisualState.stereo,
+                    ssOutgoingVisualState.target,
+                    ssOutgoingVisualState.mainCamera,
+                    ssOutgoingMotionGroup.position
+                );
+            }
+        }
+
+        // 分子切替ごとに同じ球・円柱のGPUバッファを作り直さない。
+        // 各メッシュは共有形状を拡大して使い、元素色などの材質も再利用する。
+        const moleculeRenderResources = {
+            sphere: new THREE.SphereGeometry(1, 32, 32),
+            cylinder: new THREE.CylinderGeometry(1, 1, 1, 16),
+            materials: new Map()
+        };
+
+        function getSharedMoleculeMaterial(color, roughness, metalness, transparent = false, opacity = 1, depthWrite = true) {
+            const key = [color, roughness, metalness, transparent, opacity, depthWrite].join('|');
+            let material = moleculeRenderResources.materials.get(key);
+            if (!material) {
+                material = new THREE.MeshStandardMaterial({ color, roughness, metalness, transparent, opacity, depthWrite });
+                moleculeRenderResources.materials.set(key, material);
+            }
+            return material;
+        }
+
+        function createSharedMoleculeMesh(geometry, material) {
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.userData.usesSharedMoleculeResources = true;
+            return mesh;
+        }
+
+        function disposeMoleculeSceneObject(obj) {
+            if (!obj || obj.userData.usesSharedMoleculeResources) return;
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) obj.material.dispose();
         }
 
         function buildMoleculeGeometry(data, keepOffset = false) {
             moleculeSceneObjects.forEach(obj => {
                 moleculeGroup.remove(obj);
-                if(obj.geometry) obj.geometry.dispose();
-                if(obj.material) obj.material.dispose();
+                disposeMoleculeSceneObject(obj);
             });
             moleculeSceneObjects = [];
 
@@ -2316,26 +2396,18 @@
                     if (currentRenderMode === 'ballstick') radius *= 0.85; 
                     else if (currentRenderMode === 'ghost') radius *= 0.5; 
                     
-                    const sphereGeom = new THREE.SphereGeometry(radius, 32, 32);
-                    const sphereMat = new THREE.MeshStandardMaterial({
-                        color: elementInfo.color,
-                        roughness: roughnessValue,
-                        metalness: metalnessValue
-                    });
-                    const mesh = new THREE.Mesh(sphereGeom, sphereMat);
+                    const sphereMat = getSharedMoleculeMaterial(elementInfo.color, roughnessValue, metalnessValue);
+                    const mesh = createSharedMoleculeMesh(moleculeRenderResources.sphere, sphereMat);
                     mesh.position.copy(atomPositions[index]);
+                    mesh.scale.setScalar(radius);
                     moleculeGroup.add(mesh);
                     moleculeSceneObjects.push(mesh);
                 } else if (currentRenderMode === 'spacefilling') {
                     const radius = elementInfo.radius;
-                    const sphereGeom = new THREE.SphereGeometry(radius, 32, 32);
-                    const sphereMat = new THREE.MeshStandardMaterial({
-                        color: elementInfo.color,
-                        roughness: roughnessValue,
-                        metalness: metalnessValue
-                    });
-                    const mesh = new THREE.Mesh(sphereGeom, sphereMat);
+                    const sphereMat = getSharedMoleculeMaterial(elementInfo.color, roughnessValue, metalnessValue);
+                    const mesh = createSharedMoleculeMesh(moleculeRenderResources.sphere, sphereMat);
                     mesh.position.copy(atomPositions[index]);
+                    mesh.scale.setScalar(radius);
                     moleculeGroup.add(mesh);
                     moleculeSceneObjects.push(mesh);
                 }
@@ -2343,11 +2415,7 @@
 
             // 結合線の描画
             if (currentRenderMode === 'ballstick' || currentRenderMode === 'ghost') {
-                const bondMaterial = new THREE.MeshStandardMaterial({
-                    color: 0x999999,
-                    roughness: roughnessValue,
-                    metalness: metalnessValue
-                });
+                const bondMaterial = getSharedMoleculeMaterial(0x999999, roughnessValue, metalnessValue);
 
                 data.bonds.forEach(bond => {
                     const pA = atomPositions[bond.a];
@@ -2362,11 +2430,11 @@
                     const radius = 0.08;
 
                     const createCylinderMesh = (offsetVector) => {
-                        const cylinderGeom = new THREE.CylinderGeometry(radius, radius, length, 16);
-                        const mesh = new THREE.Mesh(cylinderGeom, bondMaterial);
+                        const mesh = createSharedMoleculeMesh(moleculeRenderResources.cylinder, bondMaterial);
                         mesh.position.copy(midPoint);
                         if (offsetVector) mesh.position.add(offsetVector);
                         mesh.quaternion.copy(quaternion);
+                        mesh.scale.set(radius, length, radius);
                         moleculeGroup.add(mesh);
                         moleculeSceneObjects.push(mesh);
                     };
@@ -2405,17 +2473,10 @@
                 data.atoms.forEach((atom, index) => {
                     const elementInfo = ELEMENT_DATA[atom.element] || ELEMENT_DATA['DEFAULT'];
                     const radius = elementInfo.radius;
-                    const sphereGeom = new THREE.SphereGeometry(radius, 32, 32);
-                    const sphereMat = new THREE.MeshStandardMaterial({
-                        color: elementInfo.color,
-                        roughness: roughnessValue,
-                        metalness: metalnessValue,
-                        transparent: true,
-                        opacity: 0.3,
-                        depthWrite: false
-                    });
-                    const mesh = new THREE.Mesh(sphereGeom, sphereMat);
+                    const sphereMat = getSharedMoleculeMaterial(elementInfo.color, roughnessValue, metalnessValue, true, 0.3, false);
+                    const mesh = createSharedMoleculeMesh(moleculeRenderResources.sphere, sphereMat);
                     mesh.position.copy(atomPositions[index]);
+                    mesh.scale.setScalar(radius);
                     moleculeGroup.add(mesh);
                     moleculeSceneObjects.push(mesh);
                 });
@@ -2559,7 +2620,8 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            const delta = clock.getDelta();
+            // 切替準備などで1フレーム遅れても、次の描画で回転や浮遊が飛ばないようにする。
+            const delta = Math.min(clock.getDelta(), 0.05);
 
             controls.update();
 
@@ -2750,6 +2812,7 @@
         function resizeCanvas() {
             if (renderer) renderer.setSize(window.innerWidth, window.innerHeight);
             fitScreenSaverToViewport();
+            if (ssActive) scheduleSSCrossfadeWarmup(240);
         }
         window.addEventListener('resize', resizeCanvas);
 
