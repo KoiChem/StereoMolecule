@@ -62,6 +62,15 @@
             user-select: none;
             -webkit-touch-callout: none;
         }
+        #ss-transition-snapshot {
+            display: none;
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
 
         .view-label {
             position: absolute;
@@ -711,10 +720,11 @@
             </div>
 
             <div class="ss-row">
-                <label>分子切替フェード</label>
+                <label>分子切替効果</label>
                 <div class="ss-segment" data-key="transition" id="seg-transition">
-                    <button class="icon-btn" data-val="fade" title="ON" aria-label="分子切替フェード: ON"><span style="font-size:10px;font-weight:bold;pointer-events:none;">ON</span></button>
-                    <button class="icon-btn" data-val="off" title="OFF" aria-label="分子切替フェード: OFF"><span style="font-size:10px;font-weight:bold;pointer-events:none;">OFF</span></button>
+                    <button class="icon-btn" data-val="fade" title="フェード" aria-label="分子切替効果: フェード"><span style="font-size:9px;font-weight:bold;pointer-events:none;">FADE</span></button>
+                    <button class="icon-btn" data-val="cross" title="クロスフェード" aria-label="分子切替効果: クロスフェード"><span style="font-size:9px;font-weight:bold;pointer-events:none;">CROSS</span></button>
+                    <button class="icon-btn" data-val="off" title="OFF" aria-label="分子切替効果: OFF"><span style="font-size:10px;font-weight:bold;pointer-events:none;">OFF</span></button>
                 </div>
             </div>
 
@@ -829,6 +839,7 @@
         const MOLECULE_FETCH_TIMEOUT_MS = 12000;
         const SS_FADE_OUT_MS = 600;
         const SS_FADE_IN_MS = 800;
+        const SS_CROSSFADE_MS = 1200;
 
         const BG_COLORS = {
             'white': 0xffffff,
@@ -895,6 +906,10 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.autoClear = false;
         container.appendChild(renderer.domElement);
+        const ssTransitionSnapshot = document.createElement('canvas');
+        ssTransitionSnapshot.id = 'ss-transition-snapshot';
+        const ssTransitionSnapshotContext = ssTransitionSnapshot.getContext('2d');
+        container.appendChild(ssTransitionSnapshot);
 
         let controls;
         try {
@@ -961,7 +976,7 @@
         }
         if (!ssSettings.order) ssSettings.order = "sequential";
         if (typeof ssSettings.interval === 'undefined') ssSettings.interval = 15;
-        if (!ssSettings.transition) ssSettings.transition = "fade";
+        if (!['fade', 'cross', 'off'].includes(ssSettings.transition)) ssSettings.transition = "fade";
         if (typeof ssSettings.speed === 'undefined') ssSettings.speed = 18;
         if (!ssSettings.exitMode) ssSettings.exitMode = "normal";
         if (!ssSettings.bg) ssSettings.bg = "random";
@@ -1249,7 +1264,74 @@
         function setSSVisualOpacity(value) {
             const opacity = THREE.MathUtils.clamp(value, 0, 1);
             renderer.domElement.style.opacity = String(opacity);
-            if (ssActive) document.getElementById('label-left').style.opacity = String(opacity * 0.3);
+            setSSLabelOpacity(opacity);
+        }
+
+        function setSSLabelOpacity(value) {
+            if (ssActive) document.getElementById('label-left').style.opacity = String(THREE.MathUtils.clamp(value, 0, 1) * 0.3);
+        }
+
+        function hideSSSnapshot() {
+            ssTransitionSnapshot.style.display = 'none';
+            ssTransitionSnapshot.style.opacity = '0';
+        }
+
+        function renderSSSnapshotFrame() {
+            const renderWidth = window.innerWidth;
+            const height = window.innerHeight;
+            renderer.clear();
+
+            if (currentStereoIndex === 2) {
+                mainCamera.aspect = renderWidth / height;
+                mainCamera.updateProjectionMatrix();
+                mainCamera.projectionMatrix.elements[8] = offsetX / renderWidth;
+                mainCamera.projectionMatrix.elements[9] = offsetY / height;
+                renderer.setViewport(0, 0, renderWidth, height);
+                renderer.setScissor(0, 0, renderWidth, height);
+                renderer.setScissorTest(true);
+                renderer.render(scene, mainCamera);
+                return;
+            }
+
+            const halfWidth = renderWidth / 2;
+            const aspect = halfWidth / height;
+            cameraL.aspect = aspect;
+            cameraL.updateProjectionMatrix();
+            cameraR.aspect = aspect;
+            cameraR.updateProjectionMatrix();
+            cameraL.projectionMatrix.elements[8] = offsetX / halfWidth;
+            cameraL.projectionMatrix.elements[9] = offsetY / height;
+            cameraR.projectionMatrix.elements[8] = offsetX / halfWidth;
+            cameraR.projectionMatrix.elements[9] = offsetY / height;
+
+            const leftEyeCameraActive = (currentStereoIndex === 1) ? cameraL : cameraR;
+            const rightEyeCameraActive = (currentStereoIndex === 1) ? cameraR : cameraL;
+            renderer.setViewport(0, 0, halfWidth, height);
+            renderer.setScissor(0, 0, halfWidth, height);
+            renderer.setScissorTest(true);
+            renderer.render(scene, leftEyeCameraActive);
+            renderer.setViewport(halfWidth, 0, halfWidth, height);
+            renderer.setScissor(halfWidth, 0, halfWidth, height);
+            renderer.setScissorTest(true);
+            renderer.render(scene, rightEyeCameraActive);
+        }
+
+        function captureSSSnapshot() {
+            if (!ssTransitionSnapshotContext || !renderer.domElement.width || !renderer.domElement.height) return false;
+            try {
+                renderSSSnapshotFrame();
+                ssTransitionSnapshot.width = renderer.domElement.width;
+                ssTransitionSnapshot.height = renderer.domElement.height;
+                ssTransitionSnapshotContext.clearRect(0, 0, ssTransitionSnapshot.width, ssTransitionSnapshot.height);
+                ssTransitionSnapshotContext.drawImage(renderer.domElement, 0, 0);
+                ssTransitionSnapshot.style.opacity = '1';
+                ssTransitionSnapshot.style.display = 'block';
+                return true;
+            } catch (error) {
+                console.warn('Screensaver crossfade snapshot failed; using fade instead.', error);
+                hideSSSnapshot();
+                return false;
+            }
         }
 
         function cancelSSTransition(restoreVisible = true) {
@@ -1263,6 +1345,7 @@
                 ssTransitionFinish = null;
                 finish(false);
             }
+            hideSSSnapshot();
             if (restoreVisible) {
                 setSSBackdrop();
                 setSSVisualOpacity(1);
@@ -1299,6 +1382,38 @@
             });
         }
 
+        function animateSSCrossfade(duration, transitionId) {
+            return new Promise(resolve => {
+                const startTime = performance.now();
+                ssTransitionFinish = resolve;
+
+                const step = now => {
+                    if (!ssActive || transitionId !== ssTransitionId) {
+                        ssTransitionFrame = null;
+                        ssTransitionFinish = null;
+                        resolve(false);
+                        return;
+                    }
+
+                    const progress = Math.min(1, (now - startTime) / duration);
+                    const eased = smootherStep01(progress);
+                    ssTransitionSnapshot.style.opacity = String(1 - eased);
+                    setSSLabelOpacity(eased);
+
+                    if (progress >= 1) {
+                        ssTransitionFrame = null;
+                        ssTransitionFinish = null;
+                        hideSSSnapshot();
+                        resolve(true);
+                        return;
+                    }
+                    ssTransitionFrame = requestAnimationFrame(step);
+                };
+
+                ssTransitionFrame = requestAnimationFrame(step);
+            });
+        }
+
         async function commitSSMolecule(parsedData, labelText, isCurrent) {
             if (!isCurrent()) return false;
             applySSPendingFx();
@@ -1319,6 +1434,21 @@
 
             cancelSSTransition(true);
             const transitionId = ssTransitionId;
+
+            if (ssSettings.transition === 'cross' && captureSSSnapshot()) {
+                setSSLabelOpacity(0);
+                const committed = await commitSSMolecule(
+                    parsedData,
+                    labelText,
+                    () => transitionId === ssTransitionId && isCurrent()
+                );
+                if (!committed) return false;
+
+                setSSBackdrop();
+                const crossed = await animateSSCrossfade(SS_CROSSFADE_MS, transitionId);
+                return crossed && isCurrent();
+            }
+
             const targetBg = ssPendingFx ? ssPendingFx.bg : currentBgMode;
             setSSBackdrop(targetBg);
 
