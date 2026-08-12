@@ -711,6 +711,14 @@
             </div>
 
             <div class="ss-row">
+                <label>分子切替フェード</label>
+                <div class="ss-segment" data-key="transition" id="seg-transition">
+                    <button class="icon-btn" data-val="fade" title="ON" aria-label="分子切替フェード: ON"><span style="font-size:10px;font-weight:bold;pointer-events:none;">ON</span></button>
+                    <button class="icon-btn" data-val="off" title="OFF" aria-label="分子切替フェード: OFF"><span style="font-size:10px;font-weight:bold;pointer-events:none;">OFF</span></button>
+                </div>
+            </div>
+
+            <div class="ss-row">
                 <label>基準回転速度 (度/秒)</label>
                 <input type="number" id="ss-speed" style="width:60px; background:rgba(255,255,255,0.1); border:none; color:#fff; border-radius:8px; padding:4px 8px; text-align:center; font-size:13px; outline:none;">
             </div>
@@ -819,6 +827,8 @@
         const PUBCHEM_MIN_INTERVAL_MS = 1100;
         const PUBCHEM_COOLDOWN_MS = 30000;
         const MOLECULE_FETCH_TIMEOUT_MS = 12000;
+        const SS_FADE_OUT_MS = 600;
+        const SS_FADE_IN_MS = 800;
 
         const BG_COLORS = {
             'white': 0xffffff,
@@ -951,6 +961,7 @@
         }
         if (!ssSettings.order) ssSettings.order = "sequential";
         if (typeof ssSettings.interval === 'undefined') ssSettings.interval = 15;
+        if (!ssSettings.transition) ssSettings.transition = "fade";
         if (typeof ssSettings.speed === 'undefined') ssSettings.speed = 18;
         if (!ssSettings.exitMode) ssSettings.exitMode = "normal";
         if (!ssSettings.bg) ssSettings.bg = "random";
@@ -979,6 +990,9 @@
         let ssFailCount = 0;
         let ssFetchAbort = null;
         let ssPendingFx = null;
+        let ssTransitionId = 0;
+        let ssTransitionFrame = null;
+        let ssTransitionFinish = null;
         let previousState = {};
 
         // SS用：カメラ/ワールド混合 + 軸漂い回転
@@ -1228,8 +1242,103 @@
             ssPendingFx = null;
         }
 
+        function setSSBackdrop(mode = currentBgMode) {
+            container.style.backgroundColor = `#${new THREE.Color(BG_COLORS[mode]).getHexString()}`;
+        }
+
+        function setSSVisualOpacity(value) {
+            const opacity = THREE.MathUtils.clamp(value, 0, 1);
+            renderer.domElement.style.opacity = String(opacity);
+            if (ssActive) document.getElementById('label-left').style.opacity = String(opacity * 0.3);
+        }
+
+        function cancelSSTransition(restoreVisible = true) {
+            ssTransitionId++;
+            if (ssTransitionFrame !== null) {
+                cancelAnimationFrame(ssTransitionFrame);
+                ssTransitionFrame = null;
+            }
+            if (ssTransitionFinish) {
+                const finish = ssTransitionFinish;
+                ssTransitionFinish = null;
+                finish(false);
+            }
+            if (restoreVisible) {
+                setSSBackdrop();
+                setSSVisualOpacity(1);
+            }
+        }
+
+        function animateSSOpacity(from, to, duration, transitionId) {
+            return new Promise(resolve => {
+                const startTime = performance.now();
+                ssTransitionFinish = resolve;
+
+                const step = now => {
+                    if (!ssActive || transitionId !== ssTransitionId) {
+                        ssTransitionFrame = null;
+                        ssTransitionFinish = null;
+                        resolve(false);
+                        return;
+                    }
+
+                    const progress = Math.min(1, (now - startTime) / duration);
+                    const eased = smootherStep01(progress);
+                    setSSVisualOpacity(from + (to - from) * eased);
+
+                    if (progress >= 1) {
+                        ssTransitionFrame = null;
+                        ssTransitionFinish = null;
+                        resolve(true);
+                        return;
+                    }
+                    ssTransitionFrame = requestAnimationFrame(step);
+                };
+
+                ssTransitionFrame = requestAnimationFrame(step);
+            });
+        }
+
+        async function commitSSMolecule(parsedData, labelText, isCurrent) {
+            if (!isCurrent()) return false;
+            applySSPendingFx();
+            buildMoleculeGeometry(parsedData, false);
+            window.currentSdfData = parsedData;
+            document.getElementById('label-left').textContent = labelText;
+            await updateNameSprite(labelText, isCurrent);
+            return isCurrent();
+        }
+
+        async function transitionToSSMolecule(parsedData, labelText, isCurrent) {
+            if (ssSettings.transition === 'off') {
+                cancelSSTransition(true);
+                const committed = await commitSSMolecule(parsedData, labelText, isCurrent);
+                setSSBackdrop();
+                return committed;
+            }
+
+            cancelSSTransition(true);
+            const transitionId = ssTransitionId;
+            const targetBg = ssPendingFx ? ssPendingFx.bg : currentBgMode;
+            setSSBackdrop(targetBg);
+
+            const fadedOut = await animateSSOpacity(1, 0, SS_FADE_OUT_MS, transitionId);
+            if (!fadedOut || !isCurrent()) return false;
+
+            const committed = await commitSSMolecule(
+                parsedData,
+                labelText,
+                () => transitionId === ssTransitionId && isCurrent()
+            );
+            if (!committed) return false;
+
+            const fadedIn = await animateSSOpacity(0, 1, SS_FADE_IN_MS, transitionId);
+            return fadedIn && isCurrent();
+        }
+
         function stopScreenSaver() {
             if (!ssActive) return;
+            cancelSSTransition(true);
             ssActive = false;
             clearTimeout(ssTimer);
             ssTimer = null;
@@ -1271,6 +1380,7 @@
             updateDepthMode();
             updateModelMode();
             updateBgMode(currentBgMode);
+            setSSBackdrop(currentBgMode);
 
             const btnGloss = document.getElementById('btn-gloss');
             if(currentGlossMode) btnGloss.classList.add('active');
@@ -1392,12 +1502,12 @@
             nameSprite.quaternion.copy(mainCamera.quaternion);
         }
 
-        async function updateNameSprite(text) {
+        async function updateNameSprite(text, isCurrent = () => true) {
             removeNameSprite();
             if (ssSettings.nameDisplay === 'off') return;
 
             await ensureNameFontsLoaded();
-            if (!ssActive) return; 
+            if (!ssActive || !isCurrent()) return;
 
             const { texture, aspect } = createNameTexture(text, ssSettings.nameDisplay);
             const material = new THREE.MeshBasicMaterial({
@@ -1452,6 +1562,7 @@
             if (!ssActive) return false;
             clearTimeout(ssTimer);
             ssTimer = null;
+            cancelSSTransition(true);
             if (ssFetchAbort) ssFetchAbort.abort();
             ssFetchAbort = new AbortController();
             loadNextSSMolecule();
@@ -2089,10 +2200,11 @@
                     await cacheMolecule(cacheKeys, result.data);
                 }
                 const parsedData = result.data;
-                if (isSS) applySSPendingFx();
-                buildMoleculeGeometry(parsedData, false); 
-                window.currentSdfData = parsedData;
-                if (!isSS) currentDisplayedMoleculeName = cleanQuery;
+                if (!isSS) {
+                    buildMoleculeGeometry(parsedData, false);
+                    window.currentSdfData = parsedData;
+                    currentDisplayedMoleculeName = cleanQuery;
+                }
 
                 const compoundTitle = compoundCid && !COMPOUND_DISPLAY_NAMES[compoundCid]
                     ? await fetchCompoundTitle(compoundCid, signal).catch(() => null)
@@ -2101,13 +2213,15 @@
                 let labelText = compoundCid
                     ? getCompoundDisplayName(compoundCid, compoundTitle, cleanQuery)
                     : cleanQuery;
-                document.getElementById('label-left').textContent = labelText;
                 
                 if (isSS) {
                     if (!ssActive) return;
-                    updateNameSprite(labelText);
+                    const transitioned = await transitionToSSMolecule(parsedData, labelText, () => !isStaleRequest());
+                    if (!transitioned || isStaleRequest()) return;
                     ssFailCount = 0;
                     ssTimer = setTimeout(loadNextSSMolecule, ssSettings.interval * 1000);
+                } else {
+                    document.getElementById('label-left').textContent = labelText;
                 }
 
             } catch (error) {
@@ -3062,6 +3176,7 @@
             };
             
             updateSeg('seg-order', ssSettings.order); updateSeg('seg-exit', ssSettings.exitMode);
+            updateSeg('seg-transition', ssSettings.transition);
             updateSeg('seg-bg', ssSettings.bg); updateSeg('seg-model', ssSettings.model);
             updateSeg('seg-stereo', ssSettings.stereo); updateSeg('seg-depth', ssSettings.depth); 
             updateSeg('seg-gloss', ssSettings.gloss);
