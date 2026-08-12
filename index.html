@@ -62,16 +62,6 @@
             user-select: none;
             -webkit-touch-callout: none;
         }
-        #ss-transition-snapshot {
-            display: none;
-            position: absolute;
-            inset: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 2;
-            pointer-events: none;
-        }
-
         .view-label {
             position: absolute;
             top: 15px;
@@ -878,6 +868,8 @@
 
         let wakeLock = null;
         let moleculeSceneObjects = [];
+        let ssOutgoingSceneObjects = [];
+        let ssOutgoingMaterialStates = [];
         let offsetX = 0;
         let offsetY = 0;
 
@@ -892,7 +884,9 @@
         // 親グループは平行移動だけなので、既存の回転軸ロジックには影響しない。
         const moleculeMotionGroup = new THREE.Group();
         const moleculeGroup = new THREE.Group();
+        const ssOutgoingMoleculeGroup = new THREE.Group();
         moleculeMotionGroup.add(moleculeGroup);
+        moleculeMotionGroup.add(ssOutgoingMoleculeGroup);
         scene.add(moleculeMotionGroup);
 
         const mainCamera = new THREE.PerspectiveCamera(45, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
@@ -906,10 +900,6 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.autoClear = false;
         container.appendChild(renderer.domElement);
-        const ssTransitionSnapshot = document.createElement('canvas');
-        ssTransitionSnapshot.id = 'ss-transition-snapshot';
-        const ssTransitionSnapshotContext = ssTransitionSnapshot.getContext('2d');
-        container.appendChild(ssTransitionSnapshot);
 
         let controls;
         try {
@@ -1271,67 +1261,47 @@
             if (ssActive) document.getElementById('label-left').style.opacity = String(THREE.MathUtils.clamp(value, 0, 1) * 0.3);
         }
 
-        function hideSSSnapshot() {
-            ssTransitionSnapshot.style.display = 'none';
-            ssTransitionSnapshot.style.opacity = '0';
+        function clearSSOutgoingMolecule() {
+            ssOutgoingSceneObjects.forEach(obj => {
+                ssOutgoingMoleculeGroup.remove(obj);
+                if (obj.geometry) obj.geometry.dispose();
+                if (obj.material) obj.material.dispose();
+                obj.renderOrder = 0;
+            });
+            ssOutgoingSceneObjects = [];
+            ssOutgoingMaterialStates = [];
+            ssOutgoingMoleculeGroup.rotation.set(0, 0, 0);
         }
 
-        function renderSSSnapshotFrame() {
-            const renderWidth = window.innerWidth;
-            const height = window.innerHeight;
-            renderer.clear();
+        function prepareSSOutgoingMolecule() {
+            clearSSOutgoingMolecule();
+            if (moleculeSceneObjects.length === 0) return false;
 
-            if (currentStereoIndex === 2) {
-                mainCamera.aspect = renderWidth / height;
-                mainCamera.updateProjectionMatrix();
-                mainCamera.projectionMatrix.elements[8] = offsetX / renderWidth;
-                mainCamera.projectionMatrix.elements[9] = offsetY / height;
-                renderer.setViewport(0, 0, renderWidth, height);
-                renderer.setScissor(0, 0, renderWidth, height);
-                renderer.setScissorTest(true);
-                renderer.render(scene, mainCamera);
-                return;
-            }
-
-            const halfWidth = renderWidth / 2;
-            const aspect = halfWidth / height;
-            cameraL.aspect = aspect;
-            cameraL.updateProjectionMatrix();
-            cameraR.aspect = aspect;
-            cameraR.updateProjectionMatrix();
-            cameraL.projectionMatrix.elements[8] = offsetX / halfWidth;
-            cameraL.projectionMatrix.elements[9] = offsetY / height;
-            cameraR.projectionMatrix.elements[8] = offsetX / halfWidth;
-            cameraR.projectionMatrix.elements[9] = offsetY / height;
-
-            const leftEyeCameraActive = (currentStereoIndex === 1) ? cameraL : cameraR;
-            const rightEyeCameraActive = (currentStereoIndex === 1) ? cameraR : cameraL;
-            renderer.setViewport(0, 0, halfWidth, height);
-            renderer.setScissor(0, 0, halfWidth, height);
-            renderer.setScissorTest(true);
-            renderer.render(scene, leftEyeCameraActive);
-            renderer.setViewport(halfWidth, 0, halfWidth, height);
-            renderer.setScissor(halfWidth, 0, halfWidth, height);
-            renderer.setScissorTest(true);
-            renderer.render(scene, rightEyeCameraActive);
+            const originalMaterials = new Set();
+            ssOutgoingMoleculeGroup.quaternion.copy(moleculeGroup.quaternion);
+            moleculeSceneObjects.forEach(obj => {
+                const originalMaterial = obj.material;
+                originalMaterials.add(originalMaterial);
+                const outgoingMaterial = originalMaterial.clone();
+                const baseOpacity = typeof outgoingMaterial.opacity === 'number' ? outgoingMaterial.opacity : 1;
+                outgoingMaterial.transparent = true;
+                outgoingMaterial.depthWrite = false;
+                obj.material = outgoingMaterial;
+                obj.renderOrder = 1;
+                ssOutgoingSceneObjects.push(obj);
+                ssOutgoingMaterialStates.push({ material: outgoingMaterial, baseOpacity });
+                ssOutgoingMoleculeGroup.add(obj);
+            });
+            originalMaterials.forEach(material => material.dispose());
+            moleculeSceneObjects = [];
+            return ssOutgoingSceneObjects.length > 0;
         }
 
-        function captureSSSnapshot() {
-            if (!ssTransitionSnapshotContext || !renderer.domElement.width || !renderer.domElement.height) return false;
-            try {
-                renderSSSnapshotFrame();
-                ssTransitionSnapshot.width = renderer.domElement.width;
-                ssTransitionSnapshot.height = renderer.domElement.height;
-                ssTransitionSnapshotContext.clearRect(0, 0, ssTransitionSnapshot.width, ssTransitionSnapshot.height);
-                ssTransitionSnapshotContext.drawImage(renderer.domElement, 0, 0);
-                ssTransitionSnapshot.style.opacity = '1';
-                ssTransitionSnapshot.style.display = 'block';
-                return true;
-            } catch (error) {
-                console.warn('Screensaver crossfade snapshot failed; using fade instead.', error);
-                hideSSSnapshot();
-                return false;
-            }
+        function setSSOutgoingOpacity(value) {
+            const opacity = THREE.MathUtils.clamp(value, 0, 1);
+            ssOutgoingMaterialStates.forEach(({ material, baseOpacity }) => {
+                material.opacity = baseOpacity * opacity;
+            });
         }
 
         function cancelSSTransition(restoreVisible = true) {
@@ -1345,7 +1315,7 @@
                 ssTransitionFinish = null;
                 finish(false);
             }
-            hideSSSnapshot();
+            clearSSOutgoingMolecule();
             if (restoreVisible) {
                 setSSBackdrop();
                 setSSVisualOpacity(1);
@@ -1397,13 +1367,13 @@
 
                     const progress = Math.min(1, (now - startTime) / duration);
                     const eased = smootherStep01(progress);
-                    ssTransitionSnapshot.style.opacity = String(1 - eased);
+                    setSSOutgoingOpacity(1 - eased);
                     setSSLabelOpacity(eased);
 
                     if (progress >= 1) {
                         ssTransitionFrame = null;
                         ssTransitionFinish = null;
-                        hideSSSnapshot();
+                        clearSSOutgoingMolecule();
                         resolve(true);
                         return;
                     }
@@ -1435,7 +1405,7 @@
             cancelSSTransition(true);
             const transitionId = ssTransitionId;
 
-            if (ssSettings.transition === 'cross' && captureSSSnapshot()) {
+            if (ssSettings.transition === 'cross' && prepareSSOutgoingMolecule()) {
                 setSSLabelOpacity(0);
                 const committed = await commitSSMolecule(
                     parsedData,
@@ -2473,6 +2443,9 @@
                     const angle = THREE.MathUtils.degToRad(currentRotateSpeed * getSSSpeedMultiplier()) * delta;
                     slerpUnitVector(ssFinalAxis, ssMixedAxis, ssRotateAxis, ssAxisRandomWeight);
                     moleculeGroup.rotateOnWorldAxis(ssFinalAxis, angle);
+                    if (ssOutgoingSceneObjects.length > 0) {
+                        ssOutgoingMoleculeGroup.rotateOnWorldAxis(ssFinalAxis, angle);
+                    }
                 } else {
                     const angle = THREE.MathUtils.degToRad(currentRotateSpeed) * delta;
                     const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
