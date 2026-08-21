@@ -795,6 +795,14 @@
                 </div>
             </div>
 
+            <div class="ss-row">
+                <label>デジタル時計 <span style="font-size:10px; color:rgba(255,255,255,0.4); margin-left:4px;">(24時間)</span></label>
+                <div class="ss-segment" data-key="clockDisplay" id="seg-clockdisplay">
+                    <button class="icon-btn" data-val="true" title="デジタル時計 ON" aria-label="デジタル時計: ON"><span style="font-family:'Jost', sans-serif; font-weight:300; font-size:11px; pointer-events:none;">ON</span></button>
+                    <button class="icon-btn" data-val="false" title="デジタル時計 OFF" aria-label="デジタル時計: OFF"><span style="font-size:10px;font-weight:bold;pointer-events:none;">OFF</span></button>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -998,6 +1006,11 @@
         if (!ssSettings.gloss) ssSettings.gloss = "random";
         if (typeof ssSettings.nameDisplay === 'undefined') ssSettings.nameDisplay = "sans"; // ★デフォルト文字をサンセリフに
         if (typeof ssSettings.nameShake === 'undefined') ssSettings.nameShake = "true";
+        // 名称をOFFにしても、時計は直前に選んだ書体を引き継げるようにする。
+        if (!['sans', 'serif'].includes(ssSettings.nameFont)) {
+            ssSettings.nameFont = ['sans', 'serif'].includes(ssSettings.nameDisplay) ? ssSettings.nameDisplay : 'sans';
+        }
+        if (typeof ssSettings.clockDisplay === 'undefined') ssSettings.clockDisplay = "false";
         let currentDisplayedMoleculeName = 'L-cysteine';
         let moleculeFetchRequestId = 0;
         let moleculeFetchAbort = null;
@@ -1448,6 +1461,7 @@
             const outgoingVisible = ssOutgoingMoleculeGroup.visible;
             const incomingNameVisible = nameSprite ? nameSprite.visible : false;
             const outgoingNameVisible = ssOutgoingNameSprite ? ssOutgoingNameSprite.visible : false;
+            const clockVisible = clockSprite ? clockSprite.visible : false;
             const currentBackground = scene.background.getHex();
             const oldVisual = ssOutgoingVisualState;
 
@@ -1460,6 +1474,9 @@
             ssOutgoingMoleculeGroup.visible = true;
             if (nameSprite) nameSprite.visible = false;
             if (ssOutgoingNameSprite) ssOutgoingNameSprite.visible = true;
+            // 時計は切替前後で同じ表示を保つ。旧画面のバッファには描かず、
+            // CROSS中に二重合成されて濃くなるのを防ぐ。
+            if (clockSprite) clockSprite.visible = false;
             scene.background.setHex(BG_COLORS[oldVisual.bg]);
 
             target.viewport.set(0, 0, target.width, target.height);
@@ -1488,6 +1505,7 @@
             ssOutgoingMoleculeGroup.visible = outgoingVisible;
             if (nameSprite) nameSprite.visible = incomingNameVisible;
             if (ssOutgoingNameSprite) ssOutgoingNameSprite.visible = outgoingNameVisible;
+            if (clockSprite) clockSprite.visible = clockVisible;
             scene.background.setHex(currentBackground);
             return true;
         }
@@ -1589,6 +1607,8 @@
             window.currentSdfData = parsedData;
             document.getElementById('label-left').textContent = labelText;
             await updateNameSprite(labelText, isCurrent);
+            await syncClockSprite(isCurrent);
+            if (isCurrent()) fitScreenSaverToViewport();
             // 初回表示の後に確保しておけば、次回のCROSS開始時には待たせない。
             if (ssOutgoingSceneObjects.length === 0) scheduleSSCrossfadeWarmup();
             return isCurrent();
@@ -1721,6 +1741,7 @@
             updateWakeLock();
 
             removeNameSprite();
+            removeClockSprite();
 
             activeTouches.clear();
             isRightDragging = false;
@@ -1739,6 +1760,10 @@
         let nameSprite = null;
         const nameSpriteBasePosition = new THREE.Vector3();
         let nameOpacityState = { current: 0, target: 0 };
+        let clockSprite = null;
+        const clockSpriteBasePosition = new THREE.Vector3();
+        let clockOpacityState = { current: 0, target: 0 };
+        let clockLastText = '';
         let nameClockTime = 0;
         let nameFontsReady = false;
 
@@ -1746,6 +1771,12 @@
             serif: "italic 600 100px 'Cormorant Garamond', serif",
             sans: "300 90px 'Jost', sans-serif"
         };
+
+        function getSelectedNameFont() {
+            return ['sans', 'serif'].includes(ssSettings.nameDisplay)
+                ? ssSettings.nameDisplay
+                : ssSettings.nameFont;
+        }
 
         async function ensureNameFontsLoaded() {
             if (nameFontsReady) return;
@@ -1795,6 +1826,39 @@
             return { texture, aspect: canvas.width / canvas.height };
         }
 
+        function createClockTexture(fontKey, text) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const fontCss = NAME_FONT_CSS[fontKey] || NAME_FONT_CSS.sans;
+            const spacing = fontKey === 'sans' ? 14 : 6;
+
+            ctx.font = fontCss;
+            // 秒が変わっても幅が揺れないよう、最大幅の数字列でキャンバスを固定する。
+            const textWidth = ctx.measureText('88:88:88').width + 8 * spacing;
+            canvas.width = Math.ceil(textWidth + 160);
+            canvas.height = 220;
+
+            ctx.font = fontCss;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(40, 40, 40, 0.55)';
+            drawSpacedText(ctx, text, canvas.width / 2, canvas.height / 2, spacing);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return { texture, canvas, context: ctx, aspect: canvas.width / canvas.height, fontCss, spacing };
+        }
+
+        function getDigitalClockText() {
+            const now = new Date();
+            const pad = value => String(value).padStart(2, '0');
+            return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+        }
+
+        function getTextSpriteWorldHeight() {
+            return Math.max(currentMoleculeRadius * 0.256, 0.4);
+        }
+
         function removeNameSprite() {
             if (nameSprite) {
                 scene.remove(nameSprite);
@@ -1805,6 +1869,19 @@
             }
             nameOpacityState.current = 0;
             nameOpacityState.target = 0;
+        }
+
+        function removeClockSprite() {
+            if (clockSprite) {
+                scene.remove(clockSprite);
+                if (clockSprite.geometry) clockSprite.geometry.dispose();
+                if (clockSprite.material.map) clockSprite.material.map.dispose();
+                clockSprite.material.dispose();
+                clockSprite = null;
+            }
+            clockLastText = '';
+            clockOpacityState.current = 0;
+            clockOpacityState.target = 0;
         }
 
         function updateNameSpritePlacement() {
@@ -1821,6 +1898,22 @@
             nameSpriteBasePosition.copy(controls.target).addScaledVector(cameraUp, -verticalOffset);
             nameSprite.position.copy(nameSpriteBasePosition);
             nameSprite.quaternion.copy(mainCamera.quaternion);
+        }
+
+        function updateClockSpritePlacement() {
+            if (!clockSprite) return;
+
+            const worldHeight = clockSprite.userData.worldHeight;
+            const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
+            const cameraDistance = mainCamera.position.distanceTo(controls.target);
+            const halfVisibleHeight = Math.tan(THREE.MathUtils.degToRad(mainCamera.fov / 2)) * cameraDistance;
+            const desiredOffset = currentMoleculeRadius + worldHeight / 2 + 0.45;
+            const safeOffset = Math.max(0, halfVisibleHeight - worldHeight / 2 - 0.2);
+            const verticalOffset = Math.min(desiredOffset, safeOffset);
+
+            clockSpriteBasePosition.copy(controls.target).addScaledVector(cameraUp, verticalOffset);
+            clockSprite.position.copy(clockSpriteBasePosition);
+            clockSprite.quaternion.copy(mainCamera.quaternion);
         }
 
         async function updateNameSprite(text, isCurrent = () => true) {
@@ -1840,7 +1933,7 @@
             });
 
             // ★フォントサイズを80%に調整 (0.32 * 0.8 = 0.256, 0.5 * 0.8 = 0.4)
-            const worldHeight = Math.max(currentMoleculeRadius * 0.256, 0.4);
+            const worldHeight = getTextSpriteWorldHeight();
             const worldWidth = worldHeight * aspect;
             const geometry = new THREE.PlaneGeometry(worldWidth, worldHeight);
             nameSprite = new THREE.Mesh(geometry, material);
@@ -1852,6 +1945,59 @@
 
             nameOpacityState.current = 0;
             nameOpacityState.target = 0.40; // ★透明度をやや上げる（不透明度0.55 -> 0.40）
+        }
+
+        function updateClockText() {
+            if (!clockSprite) return;
+            const text = getDigitalClockText();
+            if (text === clockLastText) return;
+
+            const { canvas, context, fontCss, spacing } = clockSprite.userData;
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            context.font = fontCss;
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillStyle = 'rgba(40, 40, 40, 0.55)';
+            drawSpacedText(context, text, canvas.width / 2, canvas.height / 2, spacing);
+            clockSprite.material.map.needsUpdate = true;
+            clockLastText = text;
+        }
+
+        async function syncClockSprite(isCurrent = () => true) {
+            if (ssSettings.clockDisplay !== 'true') {
+                removeClockSprite();
+                return;
+            }
+
+            const fontKey = getSelectedNameFont();
+            if (clockSprite && clockSprite.userData.fontKey === fontKey) {
+                updateClockText();
+                updateClockSpritePlacement();
+                return;
+            }
+
+            removeClockSprite();
+            await ensureNameFontsLoaded();
+            if (!ssActive || !isCurrent()) return;
+
+            const text = getDigitalClockText();
+            const { texture, canvas, context, aspect, fontCss, spacing } = createClockTexture(fontKey, text);
+            const material = new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: true,
+                opacity: 0,
+                depthWrite: false,
+                side: THREE.DoubleSide
+            });
+            const worldHeight = getTextSpriteWorldHeight();
+            const geometry = new THREE.PlaneGeometry(worldHeight * aspect, worldHeight);
+            clockSprite = new THREE.Mesh(geometry, material);
+            clockSprite.userData = { worldHeight, canvas, context, fontCss, spacing, fontKey };
+            clockLastText = text;
+            updateClockSpritePlacement();
+            scene.add(clockSprite);
+            clockOpacityState.current = 0;
+            clockOpacityState.target = 0.40;
         }
 
         function loadNextSSMolecule() {
@@ -2218,9 +2364,10 @@
 
         function getFittedCameraDistance(radius) {
             const vFovRad = (mainCamera.fov / 2) * THREE.MathUtils.DEG2RAD;
-            const labelReserve = (ssActive && ssSettings.nameDisplay !== 'off')
-                ? Math.max(radius * 0.256, 0.4) + 0.65
-                : 0;
+            const textReserve = getTextSpriteWorldHeight() + 0.65;
+            const nameReserve = (ssActive && ssSettings.nameDisplay !== 'off') ? textReserve : 0;
+            const clockReserve = (ssActive && ssSettings.clockDisplay === 'true') ? textReserve : 0;
+            const labelReserve = Math.max(nameReserve, clockReserve);
             const distV = (radius + labelReserve) / Math.sin(vFovRad);
             const hFovRad = Math.atan(Math.tan(vFovRad) * getCurrentEyeAspect());
             const distH = radius / Math.sin(hFovRad);
@@ -2255,6 +2402,7 @@
             mainCamera.position.copy(controls.target).add(direction.multiplyScalar(getFittedCameraDistance(currentMoleculeRadius)));
             updateSSCameraDepthRanges();
             updateNameSpritePlacement();
+            updateClockSpritePlacement();
         }
 
         function getSSSpeedMultiplier() {
@@ -2709,29 +2857,41 @@
 
             if (ssActive) updateSSModelMotion(delta);
 
-            if (nameSprite) {
+            if (nameSprite || clockSprite) {
                 nameClockTime += delta;
                 updateNameSpritePlacement();
+                updateClockSpritePlacement();
 
+                let bobY = 0;
+                let bobX = 0;
                 if (ssSettings.nameShake !== 'false') {
                     const speed = 1.2;
                     const amplitudeY = currentMoleculeRadius * 0.0375;
                     const amplitudeX = currentMoleculeRadius * 0.03;
 
-                    const bobY = Math.sin(nameClockTime * speed) * amplitudeY
-                               + Math.sin(nameClockTime * speed * 2.427) * (amplitudeY * 0.3);
-                    const bobX = Math.sin(nameClockTime * speed * 1.098) * amplitudeX
-                               + Math.cos(nameClockTime * speed * 1.95) * (amplitudeX * 0.4);
-
-                    const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
-                    const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(mainCamera.quaternion).normalize();
-                    nameSprite.position.addScaledVector(cameraUp, bobY).addScaledVector(cameraRight, bobX);
-                } else {
-                    nameSprite.position.copy(nameSpriteBasePosition);
+                    bobY = Math.sin(nameClockTime * speed) * amplitudeY
+                         + Math.sin(nameClockTime * speed * 2.427) * (amplitudeY * 0.3);
+                    bobX = Math.sin(nameClockTime * speed * 1.098) * amplitudeX
+                         + Math.cos(nameClockTime * speed * 1.95) * (amplitudeX * 0.4);
                 }
 
-                nameOpacityState.current += (nameOpacityState.target - nameOpacityState.current) * 0.04;
-                nameSprite.material.opacity = nameOpacityState.current;
+                const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(mainCamera.quaternion).normalize();
+                const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(mainCamera.quaternion).normalize();
+                if (nameSprite) {
+                    nameSprite.position.copy(nameSpriteBasePosition)
+                        .addScaledVector(cameraUp, bobY)
+                        .addScaledVector(cameraRight, bobX);
+                    nameOpacityState.current += (nameOpacityState.target - nameOpacityState.current) * 0.04;
+                    nameSprite.material.opacity = nameOpacityState.current;
+                }
+                if (clockSprite) {
+                    clockSprite.position.copy(clockSpriteBasePosition)
+                        .addScaledVector(cameraUp, bobY)
+                        .addScaledVector(cameraRight, bobX);
+                    updateClockText();
+                    clockOpacityState.current += (clockOpacityState.target - clockOpacityState.current) * 0.04;
+                    clockSprite.material.opacity = clockOpacityState.current;
+                }
             }
 
             updateStereoCameras();
@@ -3549,6 +3709,7 @@
             updateSeg('seg-gloss', ssSettings.gloss);
             updateSeg('seg-namedisplay', ssSettings.nameDisplay);
             updateSeg('seg-nameshake', ssSettings.nameShake);
+            updateSeg('seg-clockdisplay', ssSettings.clockDisplay);
             
             document.getElementById('ss-overlay').style.display = 'block';
             document.getElementById('ss-modal').style.display = 'flex';
@@ -3574,15 +3735,25 @@
                 seg.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 ssSettings[seg.dataset.key] = btn.dataset.val;
+                if (seg.dataset.key === 'nameDisplay' && ['sans', 'serif'].includes(btn.dataset.val)) {
+                    ssSettings.nameFont = btn.dataset.val;
+                }
                 saveSSSettings();
 
                 if (ssActive && seg.dataset.key === 'nameDisplay') {
                     const labelText = document.getElementById('label-left').textContent;
                     updateNameSprite(labelText);
+                    syncClockSprite();
+                    fitScreenSaverToViewport();
                 }
-                if (ssActive && seg.dataset.key === 'nameShake' && nameSprite) {
+                if (ssActive && seg.dataset.key === 'clockDisplay') {
+                    syncClockSprite();
+                    fitScreenSaverToViewport();
+                }
+                if (ssActive && seg.dataset.key === 'nameShake') {
                     if (ssSettings.nameShake === 'false') {
-                        nameSprite.position.copy(nameSpriteBasePosition);
+                        if (nameSprite) nameSprite.position.copy(nameSpriteBasePosition);
+                        if (clockSprite) clockSprite.position.copy(clockSpriteBasePosition);
                     }
                 }
             });
